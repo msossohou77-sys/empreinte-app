@@ -1,0 +1,16 @@
+{
+  "name": "empreinte-mvp",
+  "version": "1.0.0",
+  "description": "MVP Phase 1 + 2 + 3 + 4 — génération de documents personnalisés en masse (badges, certificats, attestations) : import image/PSD/DOCX, comptes multi-utilisateurs, personnalisation, statistiques avancées, QR codes de vérification, e-mail, API publique et webhooks",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5",
+    "pdf-lib": "^1.17.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
