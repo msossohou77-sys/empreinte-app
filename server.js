@@ -150,8 +150,30 @@ async function saveIntegrations(req, res, templateId, user) {
   if (webhookUrl) {
     try { new URL(webhookUrl); } catch (e) { return sendJson(res, 400, { error: 'URL de webhook invalide.' }); }
   }
-  const updated = db.update('templates', templateId, { webhookUrl: webhookUrl || null });
-  sendJson(res, 200, { webhookUrl: updated.webhookUrl });
+  const patch = { webhookUrl: webhookUrl || null };
+  if (typeof body.docxPreviewEnabled === 'boolean') patch.docxPreviewEnabled = body.docxPreviewEnabled;
+  const updated = db.update('templates', templateId, patch);
+  sendJson(res, 200, { webhookUrl: updated.webhookUrl, docxPreviewEnabled: !!updated.docxPreviewEnabled });
+}
+
+// Aperçu en direct pour un modèle Word (facultatif, coûteux : déclenche une vraie
+// conversion LibreOffice à chaque appel). Version authentifiée pour l'administrateur
+// pendant l'édition des champs, avec ses propres valeurs d'exemple.
+async function previewDocxAdmin(req, res, templateId, user) {
+  const template = db.find('templates', t => t.id === templateId);
+  if (!template) return sendJson(res, 404, { error: 'Modèle introuvable' });
+  if (template.ownerId !== user.id) return sendJson(res, 403, { error: 'Accès refusé' });
+  if (template.type !== 'docx') return sendJson(res, 400, { error: 'Aperçu disponible uniquement pour les modèles Word.' });
+  const body = await readJsonBody(req);
+  const workDir = path.join(WORK_DIR, 'preview-' + id());
+  try {
+    const { pngBuffer } = renderDocx(path.join(UPLOADS_DIR, template.filename), body.values || {}, workDir);
+    sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
+  } catch (e) {
+    sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 // Génération via l'API publique v1 (Phase 4) : permet à un système tiers de générer
@@ -372,6 +394,38 @@ function getTemplate(req, res, templateId, user) {
   sendJson(res, 200, { ...template, imageUrl: `/uploads/${template.filename}`, fields, links });
 }
 
+// Suppression complète d'un modèle : le fichier importé, tous les champs, liens,
+// réponses et documents générés associés sont effacés du serveur (aucune trace
+// ne subsiste, contrairement à une simple désactivation).
+function deleteTemplate(req, res, templateId, user) {
+  const template = db.find('templates', t => t.id === templateId);
+  if (!template) return sendJson(res, 404, { error: 'Modèle introuvable' });
+  if (template.ownerId !== user.id) return sendJson(res, 403, { error: 'Accès refusé' });
+
+  const links = db.filter('public_links', l => l.templateId === templateId);
+  const linkIds = links.map(l => l.id);
+  const submissions = db.filter('submissions', s => s.templateId === templateId);
+
+  // Fichiers de rendus générés (PNG + éventuel PDF pour les modèles DOCX).
+  submissions.forEach(s => {
+    ['.png', '.pdf'].forEach(ext => {
+      const p = path.join(RENDERS_DIR, s.renderId + ext);
+      try { fs.unlinkSync(p); } catch (e) { /* déjà absent */ }
+    });
+  });
+
+  // Fichier du modèle importé lui-même (image, PSD converti, ou .docx).
+  try { fs.unlinkSync(path.join(UPLOADS_DIR, template.filename)); } catch (e) { /* déjà absent */ }
+
+  db.replaceWhere('template_fields', f => f.templateId === templateId, []);
+  db.replaceWhere('public_links', l => l.templateId === templateId, []);
+  db.replaceWhere('submissions', s => s.templateId === templateId, []);
+  db.replaceWhere('renders', r => r.templateId === templateId, []);
+  db.replaceWhere('templates', t => t.id === templateId, []);
+
+  sendJson(res, 200, { ok: true });
+}
+
 async function saveFields(req, res, templateId, user) {
   const template = db.find('templates', t => t.id === templateId);
   if (!template) return sendJson(res, 404, { error: 'Modèle introuvable' });
@@ -411,7 +465,8 @@ function getPublicForm(req, res, token) {
       width: template.width, height: template.height,
       imageUrl: template.type === 'image' ? `/uploads/${template.filename}` : null,
       branding: template.branding || null,
-      mailEnabled: mailer.isConfigured()
+      mailEnabled: mailer.isConfigured(),
+      docxPreviewEnabled: !!template.docxPreviewEnabled
     },
     fields
   });
@@ -452,9 +507,24 @@ async function previewPublic(req, res, token) {
   const link = db.find('public_links', l => l.token === token);
   if (!link) return sendJson(res, 404, { error: 'Lien introuvable' });
   const template = db.find('templates', t => t.id === link.templateId);
-  if (template.type === 'docx') return sendJson(res, 400, { error: "Aperçu non disponible pour les modèles Word — génère le document pour le voir." });
-  const body = await readJsonBody(req);
   const fields = db.filter('template_fields', f => f.templateId === link.templateId);
+  const body = await readJsonBody(req);
+
+  if (template.type === 'docx') {
+    if (!template.docxPreviewEnabled) return sendJson(res, 400, { error: "Aperçu non activé pour ce modèle — génère le document pour le voir." });
+    const valuesByName = {};
+    fields.forEach(f => { valuesByName[f.name] = (body.values || {})[f.id] || ''; });
+    const workDir = path.join(WORK_DIR, 'preview-' + id());
+    try {
+      const { pngBuffer } = renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir);
+      return sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
+    } catch (e) {
+      return sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  }
+
   const pngBuffer = await renderPng(path.join(UPLOADS_DIR, template.filename), fields, body.values || {});
   sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
 }
@@ -649,7 +719,7 @@ const server = http.createServer(async (req, res) => {
     const p = url.pathname;
     const m = req.method;
 
-    if (m === 'OPTIONS') return send(res, 204, '', { 'Access-Control-Allow-Methods': 'GET,POST,PUT', 'Access-Control-Allow-Headers': 'Content-Type' });
+    if (m === 'OPTIONS') return send(res, 204, '', { 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE', 'Access-Control-Allow-Headers': 'Content-Type' });
 
     // ---- Auth ----
     if (p === '/api/auth/signup' && m === 'POST') return await signup(req, res);
@@ -665,10 +735,12 @@ const server = http.createServer(async (req, res) => {
 
     let match;
     if ((match = /^\/api\/templates\/([^/]+)$/.exec(p)) && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return getTemplate(req, res, match[1], u); }
+    if ((match = /^\/api\/templates\/([^/]+)$/.exec(p)) && m === 'DELETE') { const u = requireAuth(req, res); if (!u) return; return deleteTemplate(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/fields$/.exec(p)) && m === 'PUT') { const u = requireAuth(req, res); if (!u) return; return await saveFields(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/publish$/.exec(p)) && m === 'POST') { const u = requireAuth(req, res); if (!u) return; return publishLink(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/branding$/.exec(p)) && m === 'PUT') { const u = requireAuth(req, res); if (!u) return; return await saveBranding(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/integrations$/.exec(p)) && m === 'PUT') { const u = requireAuth(req, res); if (!u) return; return await saveIntegrations(req, res, match[1], u); }
+    if ((match = /^\/api\/templates\/([^/]+)\/preview-docx$/.exec(p)) && m === 'POST') { const u = requireAuth(req, res); if (!u) return; return await previewDocxAdmin(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/stats$/.exec(p)) && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return computeStats(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/stats\/export\.csv$/.exec(p)) && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return exportStatsCsv(req, res, match[1], u); }
     if (p === '/api/auth/api-key/regenerate' && m === 'POST') { const u = requireAuth(req, res); if (!u) return; return regenerateApiKeyHandler(req, res, u); }
