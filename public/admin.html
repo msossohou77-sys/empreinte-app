@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empreinte — Administration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1B2340; --navy-2:#242C50; --paper:#F7F3EC; --ink:#23262F;
+  --brass:#B8862B; --brass-light:#D9A94A; --slate:#6B7280; --line:#DDD6C9; --danger:#A6423B;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);}
+.app{display:flex;min-height:100vh;}
+.sidebar{width:250px;flex-shrink:0;background:var(--navy);color:#EDEBE3;padding:22px 18px;display:flex;flex-direction:column;}
+.brand{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:19px;margin-bottom:24px;display:flex;align-items:center;gap:8px;}
+.brand svg{flex-shrink:0;}
+.btn-new{background:var(--brass);color:#fff;border:none;border-radius:4px;padding:10px;font-weight:600;font-size:13px;cursor:pointer;margin-bottom:16px;}
+.btn-new:hover{background:var(--brass-light);}
+.tpl-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:3px;overflow-y:auto;}
+.tpl-item{padding:10px;border-radius:5px;cursor:pointer;font-size:13.5px;color:#C7CBE0;}
+.tpl-item:hover{background:var(--navy-2);}
+.tpl-item.active{background:var(--navy-2);color:#fff;}
+.tpl-item .meta{font-size:11px;color:#7C82A0;margin-top:2px;}
+.main{flex:1;padding:32px 40px;overflow-y:auto;}
+h1{font-family:'Space Grotesk',sans-serif;font-size:21px;margin:0 0 4px 0;}
+.subtitle{color:var(--slate);font-size:13.5px;margin:0 0 22px 0;}
+.tabs{display:flex;gap:4px;margin-bottom:22px;border-bottom:1px solid var(--line);}
+.tab{padding:9px 16px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;}
+.tab.active{color:var(--navy);border-color:var(--brass);}
+.panel{display:none;} .panel.active{display:block;}
+.upload-zone{border:1.5px dashed #C9BFA8;background:#fff;border-radius:6px;padding:36px;text-align:center;max-width:480px;cursor:pointer;display:flex;flex-direction:column;align-items:center;transition:border-color .15s ease, background .15s ease;}
+.upload-zone:hover{border-color:var(--brass);background:#FFFBF3;}
+.upload-zone.drag-over{border-color:var(--brass);background:#FFF6E5;border-style:solid;}
+.upload-zone.has-file{border-style:solid;border-color:#3E6B4F;background:#F3F8F4;}
+.upload-zone input{display:none;}
+.import-tabs{display:flex;gap:6px;margin-bottom:16px;}
+.import-tab{padding:8px 14px;font-size:13px;font-weight:600;color:var(--slate);border:1px solid var(--line);border-radius:4px;cursor:pointer;background:#fff;}
+.import-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.import-help{font-size:12.5px;color:var(--slate);max-width:480px;margin:0 0 14px 0;}
+.source-badge{display:inline-block;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--brass);border:1px solid var(--brass);border-radius:3px;padding:2px 7px;margin-left:8px;vertical-align:middle;}
+.docx-field-row{background:#fff;border:1px solid var(--line);border-radius:4px;padding:14px 16px;margin-bottom:10px;max-width:520px;}
+.docx-field-row .fname{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14px;margin-bottom:8px;}
+.docx-field-row label{display:block;font-size:11.5px;color:var(--slate);margin-bottom:4px;}
+.docx-field-row input{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-size:13px;font-family:inherit;}
+input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:3px;font-size:13.5px;font-family:inherit;}
+.field-group{max-width:480px;margin-bottom:14px;}
+.field-group label{display:block;font-size:12px;color:var(--slate);margin-bottom:5px;}
+.btn{font-family:inherit;font-weight:600;font-size:13px;padding:9px 16px;border-radius:4px;border:1px solid transparent;cursor:pointer;}
+.btn-primary{background:var(--brass);color:#fff;} .btn-primary:hover{background:var(--brass-light);}
+.btn-outline{background:#fff;border-color:var(--line);color:var(--ink);} .btn-outline:hover{border-color:var(--brass);}
+.btn-dark{background:var(--navy);color:#fff;} .btn-dark:hover{background:var(--navy-2);}
+.btn-sm{padding:6px 10px;font-size:12px;}
+.workspace{display:flex;gap:30px;align-items:flex-start;}
+.canvas-wrap{background:#fff;border:1px solid var(--line);padding:14px;flex-shrink:0;}
+canvas{display:block;}
+.canvas-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;max-width:640px;}
+.side-panel{flex:1;min-width:280px;}
+.side-panel h3{font-family:'Space Grotesk',sans-serif;font-size:15px;margin:0 0 12px 0;}
+.field-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:#fff;border:1px solid var(--line);border-radius:4px;cursor:pointer;font-size:13px;margin-bottom:6px;}
+.field-row.selected{border-color:var(--brass);background:#FFFAF0;}
+.field-tag{font-size:10px;color:var(--slate);border:1px solid var(--line);border-radius:3px;padding:1px 6px;margin-left:6px;}
+.field-row button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px;}
+.inspector{background:#fff;border:1px solid var(--line);border-radius:4px;padding:16px;margin-top:6px;}
+.inspector-row{margin-bottom:12px;}
+.inspector-row label{display:block;font-size:11.5px;color:var(--slate);margin-bottom:4px;}
+.inspector-row input,.inspector-row select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-size:13px;font-family:inherit;}
+.inspector-inline{display:flex;gap:10px;} .inspector-inline>div{flex:1;}
+.swatches{display:flex;gap:6px;}
+.swatch{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;}
+.swatch.active{border-color:var(--navy);}
+.link-card{background:#fff;border:1px solid var(--line);padding:16px 18px;max-width:520px;margin-bottom:12px;}
+.link-row{display:flex;gap:8px;align-items:center;}
+.link-row input{flex:1;background:#FBFAF7;color:var(--slate);font-size:12.5px;}
+.link-actions{display:flex;gap:8px;margin-top:10px;}
+.empty{color:var(--slate);font-size:13.5px;padding:40px 0;}
+.stat-cards{display:flex;gap:16px;margin-bottom:26px;flex-wrap:wrap;}
+.stat-card{background:#fff;border:1px solid var(--line);padding:16px 20px;min-width:140px;}
+.stat-card .num{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;}
+.stat-card .label{font-size:12px;color:var(--slate);margin-top:2px;}
+table.subs{width:100%;max-width:640px;border-collapse:collapse;font-size:13px;background:#fff;}
+table.subs th,table.subs td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);}
+table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--navy);color:#fff;padding:11px 20px;border-radius:5px;font-size:13px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--paper);}
+.auth-card{background:#fff;border:1px solid var(--line);padding:32px 30px;width:100%;max-width:360px;}
+.auth-error{color:var(--danger);font-size:12.5px;min-height:16px;margin:2px 0 12px 0;}
+.sidebar-user{margin-top:auto;padding-top:14px;border-top:1px solid var(--line-dark, rgba(255,255,255,0.14));display:flex;flex-direction:column;gap:8px;}
+.sidebar-user span{font-size:12px;color:#9BA1BE;word-break:break-all;}
+.sidebar-user button{background:none;border:1px solid #3A4270;color:#C7CBE0;border-radius:4px;padding:6px 10px;font-size:12px;cursor:pointer;}
+.sidebar-user button:hover{border-color:var(--brass);color:#fff;}
+.stats-header-row{display:flex;justify-content:space-between;align-items:center;max-width:640px;margin-bottom:10px;}
+#apiKeyBox{margin-top:6px;}
+#apiKeyBox input{width:100%;font-size:11px;font-family:monospace;padding:6px 8px;border:1px solid #3A4270;border-radius:4px;background:var(--navy-2);color:#EDEBE3;}
+</style>
+</head>
+<body>
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="brand" style="margin-bottom:22px;justify-content:center;">
+      <svg width="26" height="26" viewBox="0 0 30 30" fill="none"><circle cx="15" cy="15" r="13" stroke="#B8862B" stroke-width="1.6"/><circle cx="15" cy="15" r="7.5" stroke="#B8862B" stroke-width="1.2"/></svg>
+      <span style="color:var(--ink);">Empreinte</span>
+    </div>
+    <div class="import-tabs" style="justify-content:center;">
+      <div class="import-tab active" data-authtab="login" onclick="setAuthTab('login')">Connexion</div>
+      <div class="import-tab" data-authtab="signup" onclick="setAuthTab('signup')">Créer un compte</div>
+    </div>
+    <div class="field-group"><label>E-mail</label><input type="text" id="authEmail" placeholder="toi@exemple.com"></div>
+    <div class="field-group"><label>Mot de passe</label><input type="password" id="authPassword" placeholder="8 caractères minimum"></div>
+    <p class="auth-error" id="authError"></p>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="submitAuth()" id="authSubmitBtn">Se connecter</button>
+  </div>
+</div>
+
+<div class="app" id="appRoot" style="display:none;">
+  <div class="sidebar">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 30 30" fill="none"><circle cx="15" cy="15" r="13" stroke="#D9A94A" stroke-width="1.6"/><circle cx="15" cy="15" r="7.5" stroke="#D9A94A" stroke-width="1.2"/></svg>
+      Empreinte
+    </div>
+    <button class="btn-new" onclick="showUploadPanel()">+ Nouveau modèle</button>
+    <ul class="tpl-list" id="tplList"></ul>
+    <div class="sidebar-user">
+      <span id="userEmail"></span>
+      <button onclick="toggleApiKeyBox()">Clé API</button>
+      <div id="apiKeyBox" style="display:none;">
+        <input type="text" id="apiKeyDisplay" readonly onclick="this.select()">
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button onclick="copyApiKey()">Copier</button>
+          <button onclick="regenerateApiKey()">Régénérer</button>
+        </div>
+      </div>
+      <button onclick="doLogout()">Déconnexion</button>
+    </div>
+  </div>
+  <div class="main">
+
+    <div id="uploadPanel">
+      <h1>Importer un modèle</h1>
+      <p class="subtitle">Choisis le type de fichier à importer.</p>
+      <div class="import-tabs">
+        <div class="import-tab active" data-type="image" onclick="setImportType('image')">Image (PNG/JPG)</div>
+        <div class="import-tab" data-type="psd" onclick="setImportType('psd')">Fichier PSD</div>
+        <div class="import-tab" data-type="docx" onclick="setImportType('docx')">Document Word</div>
+      </div>
+      <div class="field-group"><label>Nom du modèle</label><input type="text" id="tplName" placeholder="Ex. Certificat de participation"></div>
+      <p class="import-help" id="importHelp">Le mapping des champs se fera ensuite manuellement, en cliquant sur l'image.</p>
+      <label class="upload-zone" id="uploadZone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+        <input type="file" id="fileInput" accept="image/png,image/jpeg" style="display:none;">
+        <svg id="uploadIcon" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#B8862B" stroke-width="1.4" style="margin-bottom:10px;flex-shrink:0;">
+          <path d="M12 15V4M12 4l-4 4M12 4l4 4"/>
+          <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/>
+        </svg>
+        <div id="uploadLabel" style="font-family:'Space Grotesk',sans-serif;font-size:14.5px;color:var(--ink);">Glisse une image ici, ou clique pour parcourir</div>
+        <div id="uploadSubLabel" style="font-size:11.5px;color:var(--slate);margin-top:4px;">PNG ou JPG, 20 Mo maximum</div>
+      </label>
+    </div>
+
+    <div id="tplPanel" style="display:none;">
+      <h1 id="tplTitle"></h1>
+      <p class="subtitle" id="tplSubtitle"></p>
+      <div class="tabs">
+        <div class="tab active" data-tab="mapping" onclick="switchTab('mapping')">Champs</div>
+        <div class="tab" data-tab="branding" onclick="switchTab('branding')">Personnaliser</div>
+        <div class="tab" data-tab="integrations" onclick="switchTab('integrations')">Intégrations</div>
+        <div class="tab" data-tab="publish" onclick="switchTab('publish')">Publier</div>
+        <div class="tab" data-tab="stats" onclick="switchTab('stats')">Statistiques</div>
+      </div>
+
+      <div class="panel active" id="panel-mapping">
+        <div class="workspace" id="imageWorkspace">
+          <div>
+            <div class="canvas-toolbar">
+              <button class="btn btn-outline btn-sm" onclick="addField()">+ Ajouter un champ</button>
+              <button class="btn btn-primary btn-sm" onclick="saveFields()">Enregistrer le mapping</button>
+            </div>
+            <div class="canvas-wrap"><canvas id="mapCanvas"></canvas></div>
+          </div>
+          <div class="side-panel">
+            <h3>Champs du formulaire</h3>
+            <div id="fieldList"></div>
+            <div id="inspectorHolder"></div>
+          </div>
+        </div>
+        <div id="docxWorkspace" style="display:none;">
+          <p class="import-help" style="max-width:520px;">Champs détectés à partir des balises <code>{{champ}}</code> du document. La mise en page reste celle du fichier Word ; seul le contenu de chaque champ est personnalisable.</p>
+          <div id="docxFieldList"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveFields()">Enregistrer</button>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-branding">
+        <p class="import-help" style="max-width:480px;">Personnalise la page publique vue par tes utilisateurs finaux.</p>
+        <div class="field-group">
+          <label>Couleur principale (en-tête de la page publique)</label>
+          <input type="color" id="brandColor" value="#1B2340" style="height:38px;max-width:80px;padding:2px;cursor:pointer;">
+        </div>
+        <div class="field-group">
+          <label>Logo (facultatif)</label>
+          <label class="upload-zone" style="padding:16px;max-width:260px;">
+            <input type="file" id="brandLogoInput" accept="image/png,image/jpeg">
+            <div id="brandLogoLabel" style="font-size:12.5px;">Glisser un logo ou cliquer</div>
+          </label>
+        </div>
+        <div class="field-group"><label>Message d'accueil</label><input type="text" id="brandWelcome" placeholder="Ex. Merci de ta participation au Forum 2026 !" maxlength="300"></div>
+        <div class="field-group"><label>Message de remerciement (après génération)</label><input type="text" id="brandThanks" placeholder="Ex. Ton badge est prêt, à bientôt !" maxlength="300"></div>
+        <button class="btn btn-primary btn-sm" onclick="saveBranding()">Enregistrer la personnalisation</button>
+      </div>
+
+      <div class="panel" id="panel-integrations">
+        <p class="import-help" style="max-width:480px;">Reçois une notification (requête POST) sur ton propre système à chaque document généré via ce modèle — utile pour connecter Empreinte à un outil tiers (CRM, billetterie, Zapier-like...).</p>
+        <div class="field-group" style="max-width:480px;">
+          <label>URL de webhook (facultatif)</label>
+          <input type="text" id="webhookUrl" placeholder="https://mon-systeme.example.com/hook">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveIntegrations()">Enregistrer</button>
+        <div class="note" style="margin-top:20px;">
+          Exemple de charge utile envoyée en POST (JSON) :
+          <pre style="white-space:pre-wrap;font-size:11.5px;margin:8px 0 0 0;">{
+  "event": "submission.created",
+  "templateId": "...", "templateName": "...",
+  "submissionId": "...", "values": { "Nom": "Awa Koffi" },
+  "downloadUrls": { "png": "...", "jpeg": "...", "pdf": "..." },
+  "verifyUrl": "...", "createdAt": "..."
+}</pre>
+        </div>
+        <p class="import-help" style="max-width:480px;margin-top:20px;">Pour générer des documents depuis un système externe sans passer par le formulaire public, utilise ta <strong>clé API</strong> (visible dans la barre latérale) avec l'API publique documentée dans le README du projet (<code>POST /api/v1/templates/{id}/generate</code>).</p>
+      </div>
+
+      <div class="panel" id="panel-publish">
+        <div id="linksHolder"></div>
+        <button class="btn btn-primary" onclick="createLink()">+ Créer un lien public</button>
+      </div>
+
+      <div class="panel" id="panel-stats">
+        <div class="stat-cards">
+          <div class="stat-card"><div class="num" id="statTotal">0</div><div class="label">Réponses reçues</div></div>
+          <div class="stat-card"><div class="num" id="statViews">0</div><div class="label">Visites du formulaire</div></div>
+          <div class="stat-card"><div class="num" id="statCompletion">—</div><div class="label">Taux de complétion</div></div>
+          <div class="stat-card"><div class="num" id="statLinks">0</div><div class="label">Liens publiés</div></div>
+        </div>
+        <div class="stats-header-row">
+          <h3 style="font-family:'Space Grotesk',sans-serif;font-size:15px;margin:0;">Réponses sur les 14 derniers jours</h3>
+          <button class="btn btn-outline btn-sm" onclick="exportCsv()">Exporter en CSV</button>
+        </div>
+        <canvas id="statsChart" width="640" height="140" style="margin-bottom:22px;"></canvas>
+        <h3 style="font-family:'Space Grotesk',sans-serif;font-size:15px;">Dernières réponses</h3>
+        <table class="subs"><thead><tr><th>Date</th><th>Aperçu des données</th></tr></thead><tbody id="subsBody"></tbody></table>
+      </div>
+    </div>
+
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+
+<script>
+const COLORS = ['#23262F','#B8862B','#A6423B','#3E6B4F','#1B2340'];
+const DISPLAY_W = 640;
+let templates = [];
+let current = null; // full template detail incl. fields/links
+let currentImg = null;
+let selectedFieldId = null;
+let dragging = null;
+let importType = 'image';
+let authMode = 'login';
+let brandLogoDataUrl = null;
+
+const IMPORT_HELP = {
+  image: "Le mapping des champs se fera ensuite manuellement, en cliquant sur l'image.",
+  psd: "Les calques nommés dans Photoshop seront détectés automatiquement et pré-positionnés comme champs (position, taille et couleur déduites du calque). Le calque de fond (non nommé) reste le décor.",
+  docx: "Les balises {{champ}} présentes dans le document (ex. {{Nom}}, {{Date}}) seront détectées automatiquement comme champs de formulaire."
+};
+const IMPORT_ACCEPT = { image: 'image/png,image/jpeg', psd: '.psd', docx: '.docx' };
+const IMPORT_LABEL = { image: 'Glisse une image ici, ou clique pour parcourir', psd: 'Glisse un fichier .psd ici, ou clique pour parcourir', docx: 'Glisse un fichier .docx ici, ou clique pour parcourir' };
+const IMPORT_SUBLABEL = { image: 'PNG ou JPG, 20 Mo maximum', psd: 'Fichier Photoshop .psd, 50 Mo maximum', docx: 'Document Word .docx, 20 Mo maximum' };
+
+function setImportType(type){
+  importType = type;
+  document.querySelectorAll('.import-tab').forEach(t=>t.classList.toggle('active', t.dataset.type===type));
+  document.getElementById('importHelp').textContent = IMPORT_HELP[type];
+  document.getElementById('fileInput').setAttribute('accept', IMPORT_ACCEPT[type]);
+  document.getElementById('uploadLabel').textContent = IMPORT_LABEL[type];
+  document.getElementById('uploadSubLabel').textContent = IMPORT_SUBLABEL[type];
+  document.getElementById('uploadZone').classList.remove('has-file');
+}
+
+function setAuthTab(tab){
+  authMode = tab;
+  document.querySelectorAll('#authScreen .import-tab').forEach(t=>t.classList.toggle('active', t.dataset.authtab===tab));
+  document.getElementById('authSubmitBtn').textContent = tab==='login' ? 'Se connecter' : 'Créer mon compte';
+  document.getElementById('authError').textContent = '';
+}
+
+async function submitAuth(){
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const endpoint = authMode==='login' ? '/api/auth/login' : '/api/auth/signup';
+  const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) });
+  const data = await res.json();
+  if(!res.ok){ document.getElementById('authError').textContent = data.error || 'Une erreur est survenue.'; return; }
+  await boot();
+}
+
+async function doLogout(){
+  await fetch('/api/auth/logout', { method:'POST' });
+  document.getElementById('appRoot').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'flex';
+  document.getElementById('authEmail').value = '';
+  document.getElementById('authPassword').value = '';
+}
+
+async function boot(){
+  const res = await fetch('/api/auth/me');
+  const { user } = await res.json();
+  if(!user){
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('appRoot').style.display = 'none';
+    return;
+  }
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appRoot').style.display = 'flex';
+  document.getElementById('userEmail').textContent = user.email;
+  document.getElementById('apiKeyDisplay').value = user.apiKey;
+  loadTemplates();
+}
+
+function toggleApiKeyBox(){
+  const box = document.getElementById('apiKeyBox');
+  box.style.display = box.style.display==='none' ? 'block' : 'none';
+}
+function copyApiKey(){
+  const input = document.getElementById('apiKeyDisplay');
+  input.select(); document.execCommand('copy');
+  showToast('Clé API copiée');
+}
+async function regenerateApiKey(){
+  if(!confirm("Régénérer la clé API ? Les intégrations utilisant l'ancienne clé cesseront de fonctionner.")) return;
+  const res = await fetch('/api/auth/api-key/regenerate', { method:'POST' });
+  const data = await res.json();
+  document.getElementById('apiKeyDisplay').value = data.apiKey;
+  showToast('Nouvelle clé API générée');
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(window._t); window._t = setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function loadTemplates(){
+  const res = await fetch('/api/templates');
+  if(res.status === 401){ document.getElementById('appRoot').style.display='none'; document.getElementById('authScreen').style.display='flex'; return; }
+  templates = await res.json();
+  renderTplList();
+}
+function renderTplList(){
+  const list = document.getElementById('tplList');
+  list.innerHTML = '';
+  templates.forEach(t=>{
+    const li = document.createElement('li');
+    li.className = 'tpl-item' + (current && current.id===t.id ? ' active' : '');
+    li.innerHTML = `${escapeHtml(t.name)}<div class="meta">${t.fieldsCount} champ(s) · ${t.linksCount} lien(s)</div>`;
+    li.onclick = ()=>selectTemplate(t.id);
+    list.appendChild(li);
+  });
+}
+
+function showUploadPanel(){
+  current = null;
+  document.getElementById('uploadPanel').style.display = 'block';
+  document.getElementById('tplPanel').style.display = 'none';
+  renderTplList();
+}
+
+async function handleSelectedFile(file){
+  if(!file) return;
+  const zone = document.getElementById('uploadZone');
+  zone.classList.remove('drag-over');
+  zone.classList.add('has-file');
+  document.getElementById('uploadLabel').textContent = 'Import en cours…';
+  document.getElementById('uploadSubLabel').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = async (ev)=>{
+    const name = document.getElementById('tplName').value || file.name;
+    const endpoint = { image:'/api/templates', psd:'/api/templates/psd', docx:'/api/templates/docx' }[importType];
+    const payloadKey = { image:'imageBase64', psd:'psdBase64', docx:'docxBase64' }[importType];
+    const payload = { name }; payload[payloadKey] = ev.target.result;
+    const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const tpl = await res.json();
+    if(!res.ok){
+      showToast(tpl.error || "Échec de l'import");
+      zone.classList.remove('has-file');
+      document.getElementById('uploadLabel').textContent = IMPORT_LABEL[importType];
+      document.getElementById('uploadSubLabel').textContent = IMPORT_SUBLABEL[importType];
+      return;
+    }
+    await loadTemplates();
+    document.getElementById('tplName').value = '';
+    document.getElementById('uploadLabel').textContent = IMPORT_LABEL[importType];
+    document.getElementById('uploadSubLabel').textContent = IMPORT_SUBLABEL[importType];
+    zone.classList.remove('has-file');
+    selectTemplate(tpl.id);
+    showToast(importType==='psd' ? `Modèle importé — ${tpl.fields.length} champ(s) détecté(s) automatiquement` : importType==='docx' ? `Modèle importé — ${tpl.fields.length} champ(s) détecté(s)` : 'Modèle importé');
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('fileInput').addEventListener('change', (e)=>{
+  handleSelectedFile(e.target.files[0]);
+});
+
+// Glisser-déposer réel : jusqu'ici, déposer un fichier sur la zone ne faisait
+// rien (seul le clic pour parcourir fonctionnait). On écoute maintenant les
+// événements de drag-and-drop directement sur la zone.
+const dropZone = document.getElementById('uploadZone');
+['dragenter','dragover'].forEach(evt=>{
+  dropZone.addEventListener(evt, (e)=>{ e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag-over'); });
+});
+['dragleave','dragend'].forEach(evt=>{
+  dropZone.addEventListener(evt, (e)=>{ e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag-over'); });
+});
+dropZone.addEventListener('drop', (e)=>{
+  e.preventDefault(); e.stopPropagation();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  handleSelectedFile(file);
+});
+
+async function selectTemplate(templateId){
+  const res = await fetch('/api/templates/'+templateId);
+  current = await res.json();
+  selectedFieldId = null;
+  document.getElementById('uploadPanel').style.display = 'none';
+  document.getElementById('tplPanel').style.display = 'block';
+  const badges = { psd: 'Importé depuis PSD', docx: 'Document Word', upload: '' };
+  const badge = badges[current.sourceType] ? `<span class="source-badge">${badges[current.sourceType]}</span>` : '';
+  document.getElementById('tplTitle').innerHTML = escapeHtml(current.name) + badge;
+  document.getElementById('tplSubtitle').textContent = current.type==='docx' ? `${current.fields.length} champ(s) détecté(s) dans le document` : `${current.width} × ${current.height}px`;
+  renderTplList();
+  switchTab('mapping');
+
+  if(current.type === 'docx'){
+    document.getElementById('imageWorkspace').style.display = 'none';
+    document.getElementById('docxWorkspace').style.display = 'block';
+    renderDocxFieldList();
+  } else {
+    document.getElementById('imageWorkspace').style.display = 'flex';
+    document.getElementById('docxWorkspace').style.display = 'none';
+    currentImg = new Image();
+    currentImg.onload = ()=>{ drawMapCanvas(); };
+    currentImg.src = current.imageUrl;
+    renderFieldList();
+  }
+}
+
+function renderDocxFieldList(){
+  const holder = document.getElementById('docxFieldList');
+  holder.innerHTML = '';
+  current.fields.forEach(f=>{
+    const row = document.createElement('div');
+    row.className = 'docx-field-row';
+    row.innerHTML = `<div class="fname">{{${escapeHtml(f.name)}}}</div>
+      <label>Exemple affiché dans le formulaire public (facultatif)</label>
+      <input type="text" data-id="${f.id}" value="${escapeHtml(f.sample||'')}" placeholder="Ex. Fatou Diallo">`;
+    row.querySelector('input').oninput = (e)=>{ f.sample = e.target.value; };
+    holder.appendChild(row);
+  });
+}
+
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===tab));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+  if(tab==='publish') renderLinks();
+  if(tab==='stats') loadStats();
+  if(tab==='branding') loadBrandingForm();
+  if(tab==='integrations') document.getElementById('webhookUrl').value = current.webhookUrl || '';
+}
+
+async function saveIntegrations(){
+  const webhookUrl = document.getElementById('webhookUrl').value.trim();
+  const res = await fetch(`/api/templates/${current.id}/integrations`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ webhookUrl }) });
+  const data = await res.json();
+  if(!res.ok){ showToast(data.error || 'Erreur'); return; }
+  current.webhookUrl = data.webhookUrl;
+  showToast('Intégration enregistrée');
+}
+
+/* ---------------- Branding / personnalisation ---------------- */
+function loadBrandingForm(){
+  const b = current.branding || {};
+  document.getElementById('brandColor').value = b.primaryColor || '#1B2340';
+  document.getElementById('brandWelcome').value = b.welcomeMessage || '';
+  document.getElementById('brandThanks').value = b.thankYouMessage || '';
+  brandLogoDataUrl = b.logoDataUrl || null;
+  document.getElementById('brandLogoLabel').textContent = brandLogoDataUrl ? 'Logo actuel conservé — clique pour le remplacer' : 'Glisser un logo ou cliquer';
+}
+document.getElementById('brandLogoInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{ brandLogoDataUrl = ev.target.result; document.getElementById('brandLogoLabel').textContent = file.name; };
+  reader.readAsDataURL(file);
+});
+async function saveBranding(){
+  const payload = {
+    primaryColor: document.getElementById('brandColor').value,
+    welcomeMessage: document.getElementById('brandWelcome').value,
+    thankYouMessage: document.getElementById('brandThanks').value,
+    logoDataUrl: brandLogoDataUrl
+  };
+  const res = await fetch(`/api/templates/${current.id}/branding`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  const data = await res.json();
+  current.branding = data.branding;
+  showToast('Personnalisation enregistrée');
+}
+
+/* ---------------- Mapping ---------------- */
+function addField(){
+  const n = current.fields.length + 1;
+  current.fields.push({ id:'tmp-'+Date.now()+n, name:'Champ '+n, type:'text', x:0.5, y:0.5, w:0.3, h:0.06, fontSize:0.03, color:'#23262F', align:'center', sample:'Exemple' });
+  renderFieldList(); drawMapCanvas();
+}
+function removeField(fid){
+  current.fields = current.fields.filter(f=>f.id!==fid);
+  if(selectedFieldId===fid) selectedFieldId=null;
+  renderFieldList(); drawMapCanvas();
+  document.getElementById('inspectorHolder').innerHTML='';
+}
+function selectField(fid){ selectedFieldId=fid; renderFieldList(); renderInspector(); drawMapCanvas(); }
+
+function renderFieldList(){
+  const list = document.getElementById('fieldList');
+  list.innerHTML = '';
+  current.fields.forEach(f=>{
+    const row = document.createElement('div');
+    row.className = 'field-row' + (selectedFieldId===f.id?' selected':'');
+    row.innerHTML = `<div>${escapeHtml(f.name)}<span class="field-tag">${f.type}</span></div><button>✕</button>`;
+    row.querySelector('div').onclick = ()=>selectField(f.id);
+    row.querySelector('button').onclick = (e)=>{ e.stopPropagation(); removeField(f.id); };
+    list.appendChild(row);
+  });
+}
+
+function renderInspector(){
+  const f = current.fields.find(x=>x.id===selectedFieldId);
+  const holder = document.getElementById('inspectorHolder');
+  if(!f){ holder.innerHTML=''; return; }
+  const isQr = f.type === 'qrcode';
+  holder.innerHTML = `
+    <div class="inspector">
+      <div class="inspector-row"><label>Nom du champ</label><input type="text" id="insp-name" value="${escapeHtml(f.name)}"></div>
+      <div class="inspector-row"><label>Type</label>
+        <select id="insp-type"><option value="text" ${f.type==='text'?'selected':''}>Texte</option><option value="image" ${f.type==='image'?'selected':''}>Image / photo</option><option value="qrcode" ${f.type==='qrcode'?'selected':''}>QR code de vérification</option></select>
+      </div>
+      ${isQr ? `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>` : `
+      <div class="inspector-row inspector-inline">
+        <div><label>Taille du texte (% largeur)</label><input type="number" id="insp-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
+        <div><label>Alignement</label><select id="insp-align">
+          <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
+          <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
+          <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
+        </select></div>
+      </div>
+      <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>
+      `}
+      <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur le document pour le repositionner.</div>
+    </div>`;
+  holder.querySelector('#insp-name').oninput = e=>{ f.name=e.target.value; renderFieldList(); drawMapCanvas(); };
+  holder.querySelector('#insp-type').onchange = e=>{
+    f.type=e.target.value;
+    if((f.type==='image' || f.type==='qrcode') && f.w > 0.28){
+      // Les champs texte ont par défaut un rectangle large et bas ; un visuel carré
+      // est plus adapté pour une photo ou un QR code.
+      const squarePx = 0.18 * current.width;
+      f.w = 0.18;
+      f.h = squarePx / current.height;
+    }
+    renderInspector(); drawMapCanvas();
+  };
+  const sizeInput = holder.querySelector('#insp-size');
+  if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; drawMapCanvas(); };
+  const alignInput = holder.querySelector('#insp-align');
+  if(alignInput) alignInput.onchange = e=>{ f.align=e.target.value; drawMapCanvas(); };
+  holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; renderInspector(); drawMapCanvas(); });
+}
+
+function templateSize(){
+  const ratio = current.height / current.width;
+  return { w: DISPLAY_W, h: Math.round(DISPLAY_W*ratio) };
+}
+function drawFieldOnCtx(ctx, f, w, h){
+  const cx=f.x*w, cy=f.y*h;
+  if(f.type==='text'){
+    const fontPx = f.fontSize*w;
+    ctx.font = fontPx+'px Georgia'; ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
+    let dx = cx; if(f.align==='left') dx = cx-(f.w*w)/2; if(f.align==='right') dx = cx+(f.w*w)/2;
+    ctx.fillText(f.sample||f.name, dx, cy);
+  } else {
+    const bw=f.w*w, bh=f.h*h;
+    ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]); ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh); ctx.setLineDash([]);
+    ctx.fillStyle='#B8862B'; ctx.font='12px Inter'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(f.type==='qrcode' ? 'QR' : 'Photo', cx, cy);
+  }
+}
+function drawMapCanvas(){
+  const canvas = document.getElementById('mapCanvas');
+  const {w,h} = templateSize();
+  canvas.width=w; canvas.height=h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(currentImg,0,0,w,h);
+  current.fields.forEach(f=>{
+    drawFieldOnCtx(ctx,f,w,h);
+    if(f.id===selectedFieldId){
+      const bw = f.type==='text' ? Math.max(f.w*w,40) : f.w*w;
+      const bh = f.type==='text' ? f.fontSize*w*1.4 : f.h*h;
+      ctx.strokeStyle='#B8862B'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
+      ctx.strokeRect(f.x*w-bw/2, f.y*h-bh/2, bw, bh); ctx.setLineDash([]);
+    }
+  });
+}
+function fieldHitTest(f,mx,my,w,h){
+  const bw = f.type==='text' ? Math.max(f.w*w,60) : f.w*w;
+  const bh = f.type==='text' ? f.fontSize*w*1.5 : f.h*h;
+  const cx=f.x*w, cy=f.y*h;
+  return mx>cx-bw/2 && mx<cx+bw/2 && my>cy-bh/2 && my<cy+bh/2;
+}
+const mapCanvasEl = document.getElementById('mapCanvas');
+mapCanvasEl.addEventListener('mousedown', e=>{
+  if(!current) return;
+  const rect = mapCanvasEl.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  for(let i=current.fields.length-1;i>=0;i--){
+    if(fieldHitTest(current.fields[i], mx, my, mapCanvasEl.width, mapCanvasEl.height)){
+      dragging = current.fields[i].id; selectField(dragging); return;
+    }
+  }
+});
+mapCanvasEl.addEventListener('mousemove', e=>{
+  if(!dragging) return;
+  const rect = mapCanvasEl.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const f = current.fields.find(x=>x.id===dragging);
+  f.x = Math.min(0.98, Math.max(0.02, mx/mapCanvasEl.width));
+  f.y = Math.min(0.98, Math.max(0.02, my/mapCanvasEl.height));
+  drawMapCanvas();
+});
+window.addEventListener('mouseup', ()=>{ dragging=null; });
+
+async function saveFields(){
+  const fields = current.fields.map(f=>({ ...f, id: f.id.startsWith('tmp-') ? undefined : f.id }));
+  const res = await fetch(`/api/templates/${current.id}/fields`, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ fields })
+  });
+  const data = await res.json();
+  current.fields = data.fields;
+  await loadTemplates();
+  showToast('Mapping enregistré');
+}
+
+/* ---------------- Publish ---------------- */
+async function createLink(){
+  const res = await fetch(`/api/templates/${current.id}/publish`, { method:'POST' });
+  const link = await res.json();
+  current.links.push(link);
+  await loadTemplates();
+  renderLinks();
+  showToast('Lien public créé');
+}
+function renderLinks(){
+  const holder = document.getElementById('linksHolder');
+  if(!current.links.length){ holder.innerHTML = '<p class="empty">Aucun lien publié pour ce modèle. Enregistre d\'abord ton mapping, puis crée un lien.</p>'; return; }
+  holder.innerHTML = current.links.map(l=>{
+    const url = location.origin + '/form?token=' + l.token;
+    return `<div class="link-card">
+      <div class="link-row"><input type="text" readonly value="${url}" id="link-${l.id}"></div>
+      <div class="link-actions">
+        <button class="btn btn-dark btn-sm" onclick="copyLink('${l.id}')">Copier</button>
+        <a class="btn btn-outline btn-sm" href="${url}" target="_blank" style="text-decoration:none;">Ouvrir</a>
+      </div>
+    </div>`;
+  }).join('');
+}
+function copyLink(id){
+  const input = document.getElementById('link-'+id);
+  input.select(); document.execCommand('copy');
+  showToast('Lien copié');
+}
+
+/* ---------------- Stats ---------------- */
+async function loadStats(){
+  const res = await fetch(`/api/templates/${current.id}/stats`);
+  const stats = await res.json();
+  document.getElementById('statTotal').textContent = stats.total;
+  document.getElementById('statViews').textContent = stats.totalViews;
+  document.getElementById('statCompletion').textContent = stats.completionRate===null ? '—' : stats.completionRate+'%';
+  document.getElementById('statLinks').textContent = stats.links.length;
+  drawStatsChart(stats.byDay);
+  const body = document.getElementById('subsBody');
+  if(!stats.recent.length){ body.innerHTML = '<tr><td colspan="2" style="color:var(--slate);">Aucune réponse pour le moment.</td></tr>'; return; }
+  body.innerHTML = stats.recent.map(s=>{
+    const preview = Object.entries(s.values).map(([k,v])=>`${k}: ${v}`).join(' · ');
+    return `<tr><td>${new Date(s.createdAt).toLocaleString('fr-FR')}</td><td>${escapeHtml(preview)}</td></tr>`;
+  }).join('');
+}
+
+function drawStatsChart(byDay){
+  const canvas = document.getElementById('statsChart');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const days = [];
+  const now = new Date();
+  for(let i=13;i>=0;i--){ const d = new Date(now); d.setDate(d.getDate()-i); days.push(d); }
+  const counts = days.map(d=>byDay[d.toISOString().slice(0,10)] || 0);
+  const max = Math.max(1, ...counts);
+  const barW = canvas.width / days.length;
+  ctx.font = '10px Inter';
+  days.forEach((d,i)=>{
+    const h = Math.round((counts[i]/max) * 100);
+    const x = i*barW + barW*0.2;
+    const w = barW*0.6;
+    ctx.fillStyle = '#D9A94A';
+    ctx.fillRect(x, 110-h, w, h);
+    ctx.fillStyle = '#6B7280';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(d.getDate()), x+w/2, 126);
+    if(counts[i]>0){ ctx.fillStyle = '#23262F'; ctx.fillText(String(counts[i]), x+w/2, 105-h<10?12:105-h); }
+  });
+}
+
+function exportCsv(){
+  window.location.href = `/api/templates/${current.id}/stats/export.csv`;
+}
+
+boot();
+</script>
+</body>
+</html>
