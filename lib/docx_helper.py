@@ -11,18 +11,40 @@ import sys
 import json
 import re
 from docx import Document
+from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 
 PATTERN = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 
 
 def iter_all_paragraphs(doc):
-    for p in doc.paragraphs:
-        yield p
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    yield p
+    """Parcourt TOUS les paragraphes du document, à n'importe quelle profondeur :
+    corps principal, tableaux (imbriqués ou non), zones de texte / formes, ET
+    en-têtes / pieds de page. On descend directement dans l'arbre XML (w:p =
+    paragraphe, peu importe où il se trouve) plutôt que de se limiter à l'API
+    de haut niveau de python-docx (doc.paragraphs / doc.tables), qui ne voit pas
+    le contenu des zones de texte. C'est ce qui permet de conserver la mise en
+    forme d'origine (polices, styles, formes) même quand un champ {{...}} est
+    placé dans un en-tête ou une zone de texte, pas seulement dans le corps.
+    """
+    for p_element in doc.element.body.iter(qn('w:p')):
+        yield Paragraph(p_element, doc)
+
+    for section in doc.sections:
+        candidates = [section.header, section.footer]
+        try:
+            if section.different_first_page_header_footer:
+                candidates += [section.first_page_header, section.first_page_footer]
+        except Exception:
+            pass
+        for part in candidates:
+            if part is None:
+                continue
+            try:
+                for p_element in part._element.iter(qn('w:p')):
+                    yield Paragraph(p_element, part)
+            except Exception:
+                continue
 
 
 def extract_fields(path):
