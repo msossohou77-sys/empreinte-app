@@ -631,7 +631,12 @@ function computeStats(req, res, templateId, user) {
 function serveStatic(req, res, filePath) {
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) return sendJson(res, 404, { error: 'Not found' });
   const ext = path.extname(filePath);
-  send(res, 200, fs.readFileSync(filePath), { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  // Sans cet en-tête, les navigateurs gardent en cache admin.html/form.html et
+  // n'affichent pas tout de suite une mise à jour de l'application après un
+  // redéploiement — d'où l'impression qu'un changement "n'a pas pris".
+  const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+  if (ext === '.html') headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+  send(res, 200, fs.readFileSync(filePath), headers);
 }
 
 // ---------------------------------------------------------------------------
@@ -698,4 +703,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Empreinte MVP démarré : http://localhost:${PORT}/admin`);
+  // Diagnostic utile après un déploiement : si ce nombre de comptes retombe à 0
+  // à chaque redémarrage alors que tu en as déjà créé, c'est que le dossier
+  // data/ n'est pas persistant (volume manquant ou mal configuré sur l'hébergeur).
+  const userCount = db.all('users').length;
+  const templateCount = db.all('templates').length;
+  console.log(`Données chargées depuis data/db.json : ${userCount} compte(s), ${templateCount} modèle(s).`);
+  if (userCount === 0) {
+    console.log("Aucun compte trouvé — normal au tout premier démarrage. Si tu en avais déjà créé un, vérifie que le dossier data/ est bien sur un volume persistant.");
+  }
 });
