@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulaire — Empreinte</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{ --navy:#1B2340; --paper:#F7F3EC; --ink:#23262F; --brass:#B8862B; --brass-light:#D9A94A; --slate:#6B7280; --line:#DDD6C9; }
+*{box-sizing:border-box;}
+body{margin:0;font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);padding:40px 20px;}
+.frame{max-width:760px;margin:0 auto;background:#fff;border:1px solid var(--line);}
+.head{background:var(--navy);color:#fff;padding:20px 26px;}
+.head h1{font-family:'Space Grotesk',sans-serif;font-size:19px;margin:0 0 4px 0;}
+.head p{margin:0;font-size:13px;color:#B7BCD6;}
+.body{padding:26px;display:flex;gap:28px;flex-wrap:wrap;}
+.fields{flex:1;min-width:240px;}
+.fields label{display:block;font-size:13px;color:var(--slate);margin:0 0 5px 0;}
+.fields input[type=text], .fields input[type=file]{width:100%;padding:10px 11px;margin-bottom:16px;border:1px solid var(--line);border-radius:3px;font-size:14px;font-family:inherit;}
+.preview-wrap{flex-shrink:0;}
+canvas{display:block;border:1px solid var(--line);max-width:100%;}
+.btn{font-family:inherit;font-weight:600;font-size:13px;padding:10px 16px;border-radius:4px;border:1px solid transparent;cursor:pointer;}
+.btn-primary{background:var(--brass);color:#fff;} .btn-primary:hover{background:var(--brass-light);}
+.btn-outline{background:#fff;border-color:var(--line);color:var(--ink);} .btn-outline:hover{border-color:var(--brass);}
+.export-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.state{text-align:center;padding:60px 20px;color:var(--slate);}
+.success{background:#F1F7F3;border:1px solid #CFE3D6;color:#2F5B41;padding:14px 16px;border-radius:4px;font-size:13.5px;margin-bottom:16px;}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="head" id="headBlock">
+    <img id="brandLogo" style="display:none;height:32px;margin-bottom:8px;" alt="Logo">
+    <h1 id="tplName">Chargement…</h1>
+    <p id="welcomeMsg">Remplis le formulaire ci-dessous puis télécharge ton document personnalisé.</p>
+  </div>
+  <div class="body" id="body" style="display:none;">
+    <div class="fields" id="fieldsHolder"></div>
+    <div class="preview-wrap">
+      <canvas id="previewCanvas"></canvas>
+      <img id="docxPreviewImgPublic" style="display:none;max-width:100%;border:1px solid var(--line);" alt="Aperçu du document">
+      <p class="docx-note" id="docxNote" style="display:none;font-size:12.5px;color:var(--slate);max-width:260px;">Aperçu non disponible pour ce type de document — génère-le pour voir le résultat.</p>
+      <div class="export-row" id="exportRow" style="display:none;">
+        <a class="btn btn-outline" id="dlPng">PNG</a>
+        <a class="btn btn-outline" id="dlJpeg">JPEG</a>
+        <a class="btn btn-outline" id="dlPdf">PDF</a>
+      </div>
+      <div class="export-row">
+        <button class="btn btn-primary" onclick="submitForm()" id="submitBtn">Générer mon document</button>
+      </div>
+    </div>
+  </div>
+  <div class="state" id="stateMsg">Chargement du formulaire…</div>
+</div>
+
+<script>
+const DISPLAY_W = 640;
+let form = null; // { template, fields }
+let templateImg = null;
+let values = {}; // fieldId -> string | {imgObj}
+
+const token = new URLSearchParams(location.search).get('token');
+
+async function init(){
+  if(!token){ document.getElementById('stateMsg').textContent = "Lien invalide : aucun jeton fourni."; return; }
+  const res = await fetch('/api/public/'+token);
+  if(!res.ok){ document.getElementById('stateMsg').textContent = "Ce lien est introuvable ou a expiré."; return; }
+  form = await res.json();
+  fetch('/api/public/'+token+'/view', { method:'POST' }); // suivi d'usage, sans bloquer l'affichage
+  document.getElementById('tplName').textContent = form.template.name;
+  applyBranding(form.template.branding);
+  document.getElementById('stateMsg').style.display = 'none';
+  document.getElementById('body').style.display = 'flex';
+  buildFields();
+  if(form.template.type === 'docx'){
+    document.getElementById('previewCanvas').style.display = 'none';
+    if(form.template.docxPreviewEnabled){
+      document.getElementById('docxPreviewImgPublic').style.display = 'block';
+      scheduleDocxLivePreview();
+    } else {
+      document.getElementById('docxNote').style.display = 'block';
+    }
+  } else {
+    templateImg = new Image();
+    templateImg.onload = drawPreview;
+    templateImg.src = form.template.imageUrl;
+  }
+}
+
+function applyBranding(branding){
+  if(!branding) return;
+  if(branding.primaryColor) document.getElementById('headBlock').style.background = branding.primaryColor;
+  if(branding.welcomeMessage) document.getElementById('welcomeMsg').textContent = branding.welcomeMessage;
+  if(branding.logoDataUrl){
+    const logo = document.getElementById('brandLogo');
+    logo.src = branding.logoDataUrl;
+    logo.style.display = 'block';
+  }
+}
+
+function buildFields(){
+  const holder = document.getElementById('fieldsHolder');
+  holder.innerHTML = '';
+  form.fields.forEach(f=>{
+    if(f.type==='qrcode') return; // généré automatiquement, jamais saisi par l'utilisateur
+    const wrap = document.createElement('div');
+    if(f.type==='text'){
+      wrap.innerHTML = `<label>${f.name}</label><input type="text" data-f="${f.id}" placeholder="${f.sample||''}">`;
+    } else {
+      wrap.innerHTML = `<label>${f.name}</label><input type="file" accept="image/*" data-f="${f.id}">`;
+    }
+    holder.appendChild(wrap);
+  });
+  if(form.template.mailEnabled){
+    const emailWrap = document.createElement('div');
+    emailWrap.innerHTML = `<label>Ton e-mail (facultatif, pour recevoir une copie)</label><input type="text" id="emailInput" placeholder="toi@exemple.com">`;
+    holder.appendChild(emailWrap);
+  }
+  holder.querySelectorAll('input[type=text]').forEach(inp=>{
+    if(inp.id==='emailInput') return;
+    inp.addEventListener('input', ()=>{
+      values[inp.dataset.f] = inp.value;
+      if(form.template.type==='docx') scheduleDocxLivePreview(); else drawPreview();
+    });
+  });
+  holder.querySelectorAll('input[type=file]').forEach(inp=>{
+    inp.addEventListener('change', e=>{
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ev=>{
+        const img = new Image();
+        img.onload = ()=>{ values[inp.dataset.f] = { imgObj: img, dataUri: ev.target.result }; drawPreview(); };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+}
+
+function templateSize(){
+  const ratio = form.template.height / form.template.width;
+  return { w: DISPLAY_W, h: Math.round(DISPLAY_W*ratio) };
+}
+
+function drawPreview(){
+  if(form.template.type === 'docx') return;
+  const canvas = document.getElementById('previewCanvas');
+  const {w,h} = templateSize();
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(templateImg, 0,0,w,h);
+  form.fields.forEach(f=>{
+    if(f.type==='qrcode') return; // aperçu non pertinent avant génération réelle
+    const cx=f.x*w, cy=f.y*h;
+    const v = values[f.id];
+    if(f.type==='text'){
+      const fontPx = f.fontSize*w;
+      ctx.font = fontPx+'px Georgia'; ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
+      let dx=cx; if(f.align==='left') dx=cx-(f.w*w)/2; if(f.align==='right') dx=cx+(f.w*w)/2;
+      ctx.fillText((v!==undefined && v!=='') ? v : (f.sample||f.name), dx, cy);
+    } else {
+      const bw=f.w*w, bh=f.h*h;
+      if(v && v.imgObj){ ctx.drawImage(v.imgObj, cx-bw/2, cy-bh/2, bw, bh); }
+      else {
+        ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]); ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh); ctx.setLineDash([]);
+        ctx.fillStyle='#B8862B'; ctx.font='12px Inter'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('Photo', cx, cy);
+      }
+    }
+  });
+}
+
+/* ---------------- Aperçu en direct (DOCX, si activé par l'administrateur) ---------------- */
+let docxPublicPreviewTimer = null;
+function scheduleDocxLivePreview(){
+  clearTimeout(docxPublicPreviewTimer);
+  docxPublicPreviewTimer = setTimeout(runDocxLivePreview, 900);
+}
+async function runDocxLivePreview(){
+  const payloadValues = {};
+  for(const f of form.fields){
+    const v = values[f.id];
+    payloadValues[f.id] = (v && v.dataUri) ? v.dataUri : (v || '');
+  }
+  try{
+    const res = await fetch(`/api/public/${token}/preview`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ values: payloadValues })
+    });
+    const data = await res.json();
+    if(res.ok) document.getElementById('docxPreviewImgPublic').src = data.previewDataUri;
+  }catch(e){ /* aperçu best-effort : une erreur ici n'empêche pas de générer le document final */ }
+}
+
+async function submitForm(){
+  const btn = document.getElementById('submitBtn');
+  btn.textContent = 'Génération en cours…'; btn.disabled = true;
+  const payloadValues = {};
+  for(const f of form.fields){
+    const v = values[f.id];
+    payloadValues[f.id] = (v && v.dataUri) ? v.dataUri : (v || '');
+  }
+  const emailInput = document.getElementById('emailInput');
+  const email = emailInput ? emailInput.value.trim() : '';
+  const res = await fetch(`/api/public/${token}/submit`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ values: payloadValues, email: email || undefined })
+  });
+  const data = await res.json();
+  btn.textContent = 'Générer mon document'; btn.disabled = false;
+  if(!res.ok){ alert(data.error || 'Une erreur est survenue.'); return; }
+
+  document.getElementById('dlPng').href = data.downloadUrls.png;
+  document.getElementById('dlJpeg').href = data.downloadUrls.jpeg;
+  document.getElementById('dlPdf').href = data.downloadUrls.pdf;
+  document.getElementById('exportRow').style.display = 'flex';
+
+  const banner = document.createElement('div');
+  banner.className = 'success';
+  let msg = (form.template.branding && form.template.branding.thankYouMessage) || 'Ton document est prêt — choisis un format à télécharger.';
+  if(email && data.emailStatus && data.emailStatus.sent) msg += ' Une copie t\u2019a aussi été envoyée par e-mail.';
+  banner.textContent = msg;
+  document.getElementById('fieldsHolder').prepend(banner);
+}
+
+init();
+</script>
+</body>
+</html>
