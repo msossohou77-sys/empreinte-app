@@ -311,6 +311,42 @@ table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
 
 <script>
 const COLORS = ['#23262F','#B8862B','#A6423B','#3E6B4F','#1B2340'];
+
+// Portion de l'inspecteur qui dépend du TYPE de champ (texte / image / QR),
+// partagée entre l'éditeur d'images/PSD et l'éditeur de champs positionnés Word.
+function fieldTypeSpecificInspectorHtml(f, prefix){
+  if(f.type === 'qrcode'){
+    return `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>`;
+  }
+  if(f.type === 'image'){
+    return `<div class="inspector-row"><label>Forme du cadre</label>
+      <select id="${prefix}-shape">
+        <option value="rect" ${(!f.shape || f.shape==='rect')?'selected':''}>Rectangle</option>
+        <option value="circle" ${f.shape==='circle'?'selected':''}>Cercle</option>
+      </select></div>
+      <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">L'utilisateur final pourra zoomer/déplacer sa photo pour bien la cadrer avant de l'envoyer.</div>`;
+  }
+  // texte
+  return `<div class="inspector-row inspector-inline">
+      <div><label>Taille du texte (% largeur)</label><input type="number" id="${prefix}-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
+      <div><label>Alignement</label><select id="${prefix}-align">
+        <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
+        <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
+        <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
+      </select></div>
+    </div>
+    <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>`;
+}
+
+function wireFieldTypeSpecificInspector(holder, f, prefix, rerenderInspector, redrawOnly){
+  const sizeInput = holder.querySelector('#'+prefix+'-size');
+  if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; redrawOnly(); };
+  const alignInput = holder.querySelector('#'+prefix+'-align');
+  if(alignInput) alignInput.onchange = e=>{ f.align=e.target.value; redrawOnly(); };
+  holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; rerenderInspector(); });
+  const shapeInput = holder.querySelector('#'+prefix+'-shape');
+  if(shapeInput) shapeInput.onchange = e=>{ f.shape=e.target.value; redrawOnly(); };
+}
 const DISPLAY_W = 640;
 let templates = [];
 let current = null; // full template detail incl. fields/links
@@ -633,26 +669,16 @@ function renderDocxPositionedInspector(){
   const f = docxPositionedFields().find(x=>x.id===docxSelectedFieldId);
   const holder = document.getElementById('docxPositionedInspector');
   if(!f){ holder.innerHTML=''; return; }
-  const isQr = f.type === 'qrcode';
   holder.innerHTML = `
     <div class="inspector">
       <div class="inspector-row"><label>Nom du champ</label><input type="text" id="dinsp-name" value="${escapeHtml(f.name)}"></div>
       <div class="inspector-row"><label>Type</label>
         <select id="dinsp-type"><option value="text" ${f.type==='text'?'selected':''}>Texte</option><option value="image" ${f.type==='image'?'selected':''}>Image / photo</option><option value="qrcode" ${f.type==='qrcode'?'selected':''}>QR code de vérification</option></select>
       </div>
-      ${isQr ? `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>` : `
-      <div class="inspector-row inspector-inline">
-        <div><label>Taille du texte (% largeur)</label><input type="number" id="dinsp-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
-        <div><label>Alignement</label><select id="dinsp-align">
-          <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
-          <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
-          <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
-        </select></div>
-      </div>
-      <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>
-      `}
+      ${fieldTypeSpecificInspectorHtml(f, 'dinsp')}
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur l'aperçu pour le repositionner.</div>
     </div>`;
+  wireFieldTypeSpecificInspector(holder, f, 'dinsp', ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); }, ()=>{ renderDocxPositionedList(); drawDocxMapCanvas(); });
   holder.querySelector('#dinsp-name').oninput = e=>{ f.name=e.target.value; renderDocxPositionedList(); drawDocxMapCanvas(); };
   holder.querySelector('#dinsp-type').onchange = e=>{
     f.type=e.target.value;
@@ -663,11 +689,6 @@ function renderDocxPositionedInspector(){
     }
     renderDocxPositionedInspector(); drawDocxMapCanvas();
   };
-  const sizeInput = holder.querySelector('#dinsp-size');
-  if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; drawDocxMapCanvas(); };
-  const alignInput = holder.querySelector('#dinsp-align');
-  if(alignInput) alignInput.onchange = e=>{ f.align=e.target.value; drawDocxMapCanvas(); };
-  holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; renderDocxPositionedInspector(); drawDocxMapCanvas(); });
 }
 
 function docxCanvasSize(){
@@ -831,26 +852,16 @@ function renderInspector(){
   const f = current.fields.find(x=>x.id===selectedFieldId);
   const holder = document.getElementById('inspectorHolder');
   if(!f){ holder.innerHTML=''; return; }
-  const isQr = f.type === 'qrcode';
   holder.innerHTML = `
     <div class="inspector">
       <div class="inspector-row"><label>Nom du champ</label><input type="text" id="insp-name" value="${escapeHtml(f.name)}"></div>
       <div class="inspector-row"><label>Type</label>
         <select id="insp-type"><option value="text" ${f.type==='text'?'selected':''}>Texte</option><option value="image" ${f.type==='image'?'selected':''}>Image / photo</option><option value="qrcode" ${f.type==='qrcode'?'selected':''}>QR code de vérification</option></select>
       </div>
-      ${isQr ? `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>` : `
-      <div class="inspector-row inspector-inline">
-        <div><label>Taille du texte (% largeur)</label><input type="number" id="insp-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
-        <div><label>Alignement</label><select id="insp-align">
-          <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
-          <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
-          <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
-        </select></div>
-      </div>
-      <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>
-      `}
+      ${fieldTypeSpecificInspectorHtml(f, 'insp')}
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur le document pour le repositionner.</div>
     </div>`;
+  wireFieldTypeSpecificInspector(holder, f, 'insp', ()=>{ renderInspector(); drawMapCanvas(); }, ()=>{ renderFieldList(); drawMapCanvas(); });
   holder.querySelector('#insp-name').oninput = e=>{ f.name=e.target.value; renderFieldList(); drawMapCanvas(); };
   holder.querySelector('#insp-type').onchange = e=>{
     f.type=e.target.value;
@@ -863,11 +874,6 @@ function renderInspector(){
     }
     renderInspector(); drawMapCanvas();
   };
-  const sizeInput = holder.querySelector('#insp-size');
-  if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; drawMapCanvas(); };
-  const alignInput = holder.querySelector('#insp-align');
-  if(alignInput) alignInput.onchange = e=>{ f.align=e.target.value; drawMapCanvas(); };
-  holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; renderInspector(); drawMapCanvas(); });
 }
 
 function templateSize(){
@@ -883,7 +889,15 @@ function drawFieldOnCtx(ctx, f, w, h){
     ctx.fillText(f.sample||f.name, dx, cy);
   } else {
     const bw=f.w*w, bh=f.h*h;
-    ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]); ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh); ctx.setLineDash([]);
+    const isCircle = f.type==='image' && f.shape==='circle';
+    ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]);
+    if(isCircle){
+      const r = Math.min(bw,bh)/2;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+    } else {
+      ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh);
+    }
+    ctx.setLineDash([]);
     ctx.fillStyle='#B8862B'; ctx.font='12px Inter'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(f.type==='qrcode' ? 'QR' : 'Photo', cx, cy);
   }
