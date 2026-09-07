@@ -156,6 +156,26 @@ async function saveIntegrations(req, res, templateId, user) {
   sendJson(res, 200, { webhookUrl: updated.webhookUrl, docxPreviewEnabled: !!updated.docxPreviewEnabled });
 }
 
+// Sépare les champs Word en deux catégories : "texte de substitution" ({{Nom}},
+// sans position) et "positionnés" (x/y définis, ajoutés manuellement comme pour
+// les modèles image). Utilisé par le rendu final et par les deux aperçus.
+function splitDocxFields(fields) {
+  const nameFields = fields.filter(f => f.x === undefined || f.x === null);
+  const positionedFields = fields.filter(f => f.x !== undefined && f.x !== null);
+  return { nameFields, positionedFields };
+}
+function buildDocxValueMaps(fields, valuesById, verifyUrl) {
+  const { nameFields, positionedFields } = splitDocxFields(fields);
+  const valuesByName = {};
+  nameFields.forEach(f => { valuesByName[f.name] = valuesById[f.id] || ''; });
+  const positionedValues = {};
+  positionedFields.forEach(f => {
+    if (f.type === 'qrcode') { if (verifyUrl) positionedValues[f.id] = verifyUrl; }
+    else positionedValues[f.id] = valuesById[f.id] || '';
+  });
+  return { valuesByName, positionedFields, positionedValues };
+}
+
 // Aperçu en direct pour un modèle Word (facultatif, coûteux : déclenche une vraie
 // conversion LibreOffice à chaque appel). Version authentifiée pour l'administrateur
 // pendant l'édition des champs, avec ses propres valeurs d'exemple.
@@ -165,9 +185,11 @@ async function previewDocxAdmin(req, res, templateId, user) {
   if (template.ownerId !== user.id) return sendJson(res, 403, { error: 'Accès refusé' });
   if (template.type !== 'docx') return sendJson(res, 400, { error: 'Aperçu disponible uniquement pour les modèles Word.' });
   const body = await readJsonBody(req);
+  const fields = db.filter('template_fields', f => f.templateId === templateId);
+  const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu');
   const workDir = path.join(WORK_DIR, 'preview-' + id());
   try {
-    const { pngBuffer } = renderDocx(path.join(UPLOADS_DIR, template.filename), body.values || {}, workDir);
+    const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues });
     sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
   } catch (e) {
     sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
@@ -478,12 +500,9 @@ async function buildRender(templateId, fields, values, options = {}) {
   const renderId = id();
 
   if (template.type === 'docx') {
-    // values arrive keyed by field id (id venant du formulaire) -> il faut les
-    // reclasser par NOM de champ pour le remplissage des balises {{champ}}.
-    const valuesByName = {};
-    fields.forEach(f => { valuesByName[f.name] = values[f.id] || ''; });
+    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, values, options.verifyUrl);
     const workDir = path.join(WORK_DIR, 'render-' + renderId);
-    const { pdfBuffer, pngBuffer } = renderDocx(templatePath, valuesByName, workDir);
+    const { pdfBuffer, pngBuffer } = await renderDocx(templatePath, valuesByName, workDir, { positionedFields, positionedValues });
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.writeFileSync(path.join(RENDERS_DIR, renderId + '.pdf'), pdfBuffer);
     fs.writeFileSync(path.join(RENDERS_DIR, renderId + '.png'), pngBuffer);
@@ -512,11 +531,10 @@ async function previewPublic(req, res, token) {
 
   if (template.type === 'docx') {
     if (!template.docxPreviewEnabled) return sendJson(res, 400, { error: "Aperçu non activé pour ce modèle — génère le document pour le voir." });
-    const valuesByName = {};
-    fields.forEach(f => { valuesByName[f.name] = (body.values || {})[f.id] || ''; });
+    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu');
     const workDir = path.join(WORK_DIR, 'preview-' + id());
     try {
-      const { pngBuffer } = renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir);
+      const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues });
       return sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
     } catch (e) {
       return sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
