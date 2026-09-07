@@ -204,15 +204,34 @@ table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
         <div id="docxWorkspace" style="display:none;">
           <p class="import-help" style="max-width:520px;">Champs détectés à partir des balises <code>{{champ}}</code> du document. La mise en page, les polices et la mise en forme du fichier Word d'origine sont conservées ; seul le contenu de chaque champ est personnalisable.</p>
           <div class="docx-toolbar">
-            <button class="btn btn-outline btn-sm" onclick="addDocxField()">+ Ajouter un champ</button>
+            <button class="btn btn-outline btn-sm" onclick="addDocxField()">+ Ajouter un champ (balise {{...}})</button>
             <button class="btn btn-primary btn-sm" onclick="saveFields()">Enregistrer</button>
           </div>
+          <div id="docxFieldList"></div>
+
+          <h3 style="font-family:'Space Grotesk',sans-serif;font-size:15px;margin:30px 0 6px 0;">Champs positionnés librement</h3>
+          <p class="import-help" style="max-width:560px;">Comme sur une image : ajoute un champ texte, photo ou QR code, puis fais-le glisser directement sur l'aperçu du document pour le positionner où tu veux. Ne nécessite aucune balise dans le fichier Word.</p>
+          <div class="canvas-toolbar">
+            <button class="btn btn-outline btn-sm" onclick="addDocxPositionedField()">+ Ajouter un champ positionné</button>
+            <button class="btn btn-primary btn-sm" onclick="saveFields()">Enregistrer</button>
+          </div>
+          <div class="workspace">
+            <div>
+              <div class="canvas-wrap"><canvas id="docxMapCanvas"></canvas></div>
+              <p id="docxCanvasHint" style="font-size:11.5px;color:var(--slate);max-width:400px;">Chargement de l'aperçu du document…</p>
+            </div>
+            <div class="side-panel">
+              <h3>Champs positionnés</h3>
+              <div class="field-list" id="docxPositionedList"></div>
+              <div id="docxPositionedInspector"></div>
+            </div>
+          </div>
+
           <label class="docx-preview-toggle">
             <input type="checkbox" id="docxPreviewToggle" onchange="toggleDocxPreview()">
-            Activer l'aperçu en temps réel (recalcule le document à chaque modification — un peu plus lent)
+            Activer l'aperçu en temps réel pour l'utilisateur final (recalcule le document à chaque modification — un peu plus lent)
           </label>
           <div class="docx-editor-layout">
-            <div id="docxFieldList"></div>
             <div id="docxPreviewHolder" style="display:none;">
               <h3 style="font-family:'Space Grotesk',sans-serif;font-size:14px;margin:0 0 10px 0;">Aperçu</h3>
               <div class="docx-preview-frame">
@@ -220,6 +239,7 @@ table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
                 <div id="docxPreviewLoading" style="display:none;">Génération de l'aperçu…</div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -500,6 +520,10 @@ async function selectTemplate(templateId){
     document.getElementById('imageWorkspace').style.display = 'none';
     document.getElementById('docxWorkspace').style.display = 'block';
     renderDocxFieldList();
+    docxSelectedFieldId = null;
+    renderDocxPositionedList();
+    document.getElementById('docxPositionedInspector').innerHTML = '';
+    loadDocxCanvasBackground();
     const previewOn = !!current.docxPreviewEnabled;
     document.getElementById('docxPreviewToggle').checked = previewOn;
     document.getElementById('docxPreviewHolder').style.display = previewOn ? 'block' : 'none';
@@ -545,6 +569,155 @@ function addDocxField(){
   showToast(`Champ ajouté — insère {{${name}}} dans ton document Word pour qu'il apparaisse à l'endroit voulu.`);
 }
 
+/* ---------------- Champs positionnés (Word) — même moteur que les images ---------------- */
+let docxCanvasImg = null;
+let docxSelectedFieldId = null;
+let docxDragging = null;
+
+function docxPositionedFields(){ return current.fields.filter(f => f.x !== undefined && f.x !== null); }
+
+async function loadDocxCanvasBackground(){
+  document.getElementById('docxCanvasHint').textContent = "Génération de l'aperçu du document…";
+  const sampleValues = {};
+  current.fields.forEach(f=>{ if(f.x===undefined || f.x===null) sampleValues[f.id] = f.sample || ''; });
+  try{
+    const res = await fetch(`/api/templates/${current.id}/preview-docx`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ values: sampleValues })
+    });
+    const data = await res.json();
+    if(!res.ok){ document.getElementById('docxCanvasHint').textContent = data.error || "Aperçu indisponible."; return; }
+    docxCanvasImg = new Image();
+    docxCanvasImg.onload = ()=>{
+      document.getElementById('docxCanvasHint').textContent = "Fais glisser un champ pour le repositionner sur le document.";
+      drawDocxMapCanvas();
+    };
+    docxCanvasImg.src = data.previewDataUri;
+  }catch(e){
+    document.getElementById('docxCanvasHint').textContent = "Aperçu indisponible pour le moment.";
+  }
+}
+
+function addDocxPositionedField(){
+  const n = docxPositionedFields().length + 1;
+  const f = { id:'tmp-'+Date.now()+n, name:'Champ positionné '+n, type:'text', x:0.5, y:0.5, w:0.3, h:0.06, fontSize:0.03, color:'#23262F', align:'center', sample:'Exemple' };
+  current.fields.push(f);
+  renderDocxPositionedList();
+  selectDocxPositionedField(f.id);
+  drawDocxMapCanvas();
+}
+function removeDocxPositionedField(fid){
+  current.fields = current.fields.filter(f=>f.id!==fid);
+  if(docxSelectedFieldId===fid) docxSelectedFieldId=null;
+  renderDocxPositionedList(); drawDocxMapCanvas();
+  document.getElementById('docxPositionedInspector').innerHTML='';
+}
+function selectDocxPositionedField(fid){ docxSelectedFieldId=fid; renderDocxPositionedList(); renderDocxPositionedInspector(); drawDocxMapCanvas(); }
+
+function renderDocxPositionedList(){
+  const list = document.getElementById('docxPositionedList');
+  list.innerHTML = '';
+  docxPositionedFields().forEach(f=>{
+    const row = document.createElement('div');
+    row.className = 'field-row' + (docxSelectedFieldId===f.id?' selected':'');
+    row.innerHTML = `<div>${escapeHtml(f.name)}<span class="field-tag">${f.type}</span></div><button>✕</button>`;
+    row.querySelector('div').onclick = ()=>selectDocxPositionedField(f.id);
+    row.querySelector('button').onclick = (e)=>{ e.stopPropagation(); removeDocxPositionedField(f.id); };
+    list.appendChild(row);
+  });
+  if(docxPositionedFields().length===0){
+    list.innerHTML = '<p style="color:var(--slate);font-size:13px;">Aucun champ positionné pour le moment.</p>';
+  }
+}
+
+function renderDocxPositionedInspector(){
+  const f = docxPositionedFields().find(x=>x.id===docxSelectedFieldId);
+  const holder = document.getElementById('docxPositionedInspector');
+  if(!f){ holder.innerHTML=''; return; }
+  const isQr = f.type === 'qrcode';
+  holder.innerHTML = `
+    <div class="inspector">
+      <div class="inspector-row"><label>Nom du champ</label><input type="text" id="dinsp-name" value="${escapeHtml(f.name)}"></div>
+      <div class="inspector-row"><label>Type</label>
+        <select id="dinsp-type"><option value="text" ${f.type==='text'?'selected':''}>Texte</option><option value="image" ${f.type==='image'?'selected':''}>Image / photo</option><option value="qrcode" ${f.type==='qrcode'?'selected':''}>QR code de vérification</option></select>
+      </div>
+      ${isQr ? `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>` : `
+      <div class="inspector-row inspector-inline">
+        <div><label>Taille du texte (% largeur)</label><input type="number" id="dinsp-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
+        <div><label>Alignement</label><select id="dinsp-align">
+          <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
+          <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
+          <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
+        </select></div>
+      </div>
+      <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>
+      `}
+      <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur l'aperçu pour le repositionner.</div>
+    </div>`;
+  holder.querySelector('#dinsp-name').oninput = e=>{ f.name=e.target.value; renderDocxPositionedList(); drawDocxMapCanvas(); };
+  holder.querySelector('#dinsp-type').onchange = e=>{
+    f.type=e.target.value;
+    if((f.type==='image' || f.type==='qrcode') && f.w > 0.28){
+      const squarePx = 0.18 * docxCanvasImg.naturalWidth;
+      f.w = 0.18;
+      f.h = squarePx / docxCanvasImg.naturalHeight;
+    }
+    renderDocxPositionedInspector(); drawDocxMapCanvas();
+  };
+  const sizeInput = holder.querySelector('#dinsp-size');
+  if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; drawDocxMapCanvas(); };
+  const alignInput = holder.querySelector('#dinsp-align');
+  if(alignInput) alignInput.onchange = e=>{ f.align=e.target.value; drawDocxMapCanvas(); };
+  holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; renderDocxPositionedInspector(); drawDocxMapCanvas(); });
+}
+
+function docxCanvasSize(){
+  if(!docxCanvasImg) return { w: DISPLAY_W, h: 400 };
+  const ratio = docxCanvasImg.naturalHeight / docxCanvasImg.naturalWidth;
+  return { w: DISPLAY_W, h: Math.round(DISPLAY_W*ratio) };
+}
+
+function drawDocxMapCanvas(){
+  if(!docxCanvasImg) return;
+  const canvas = document.getElementById('docxMapCanvas');
+  const {w,h} = docxCanvasSize();
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(docxCanvasImg, 0,0,w,h);
+  docxPositionedFields().forEach(f=>{
+    drawFieldOnCtx(ctx,f,w,h);
+    if(f.id===docxSelectedFieldId){
+      const bw = f.type==='text' ? Math.max(f.w*w,40) : f.w*w;
+      const bh = f.type==='text' ? f.fontSize*w*1.4 : f.h*h;
+      ctx.strokeStyle='#B8862B'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
+      ctx.strokeRect(f.x*w-bw/2, f.y*h-bh/2, bw, bh); ctx.setLineDash([]);
+    }
+  });
+}
+
+const docxMapCanvasEl = document.getElementById('docxMapCanvas');
+docxMapCanvasEl.addEventListener('mousedown', e=>{
+  if(!current || !docxCanvasImg) return;
+  const rect = docxMapCanvasEl.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const fields = docxPositionedFields();
+  for(let i=fields.length-1;i>=0;i--){
+    if(fieldHitTest(fields[i], mx, my, docxMapCanvasEl.width, docxMapCanvasEl.height)){
+      docxDragging = fields[i].id; selectDocxPositionedField(docxDragging); return;
+    }
+  }
+});
+docxMapCanvasEl.addEventListener('mousemove', e=>{
+  if(!docxDragging) return;
+  const rect = docxMapCanvasEl.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const f = docxPositionedFields().find(x=>x.id===docxDragging);
+  if(!f) return;
+  f.x = Math.min(0.98, Math.max(0.02, mx/docxMapCanvasEl.width));
+  f.y = Math.min(0.98, Math.max(0.02, my/docxMapCanvasEl.height));
+  drawDocxMapCanvas();
+});
+window.addEventListener('mouseup', ()=>{ docxDragging=null; });
+
 /* ---------------- Aperçu en direct (DOCX) ---------------- */
 let docxPreviewTimer = null;
 function toggleDocxPreview(){
@@ -566,7 +739,7 @@ function scheduleDocxPreview(){
 
 async function runDocxPreview(){
   const values = {};
-  current.fields.forEach(f=>{ values[f.name] = f.sample || ''; });
+  current.fields.forEach(f=>{ values[f.id] = f.sample || ''; });
   try{
     const res = await fetch(`/api/templates/${current.id}/preview-docx`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ values })
