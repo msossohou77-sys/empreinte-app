@@ -190,6 +190,12 @@ async function previewDocxAdmin(req, res, templateId, user) {
   const workDir = path.join(WORK_DIR, 'preview-' + id());
   try {
     const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues });
+    // On mémorise la taille réelle de la page rendue : utile côté client pour
+    // calculer le bon ratio d'un cadre photo (cercle, recadrage) sur un modèle Word.
+    const meta = await sharp(pngBuffer).metadata();
+    if (template.width !== meta.width || template.height !== meta.height) {
+      db.update('templates', templateId, { width: meta.width, height: meta.height });
+    }
     sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
   } catch (e) {
     sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
@@ -460,6 +466,7 @@ async function saveFields(req, res, templateId, user) {
     type: f.type,
     x: f.x, y: f.y, w: f.w, h: f.h,
     fontSize: f.fontSize, color: f.color, align: f.align,
+    shape: f.shape,
     sample: f.sample || ''
   }));
   db.replaceWhere('template_fields', f => f.templateId === templateId, fields);
