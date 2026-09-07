@@ -26,6 +26,18 @@ canvas{display:block;border:1px solid var(--line);max-width:100%;}
 .export-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
 .state{text-align:center;padding:60px 20px;color:var(--slate);}
 .success{background:#F1F7F3;border:1px solid #CFE3D6;color:#2F5B41;padding:14px 16px;border-radius:4px;font-size:13.5px;margin-bottom:16px;}
+.cropper-overlay{display:none;position:fixed;inset:0;background:rgba(27,35,64,0.75);z-index:100;align-items:center;justify-content:center;padding:20px;}
+.cropper-overlay.show{display:flex;}
+.cropper-box{background:#fff;border-radius:8px;padding:22px;max-width:420px;width:100%;text-align:center;}
+.cropper-box h3{font-family:'Space Grotesk',sans-serif;font-size:16px;margin:0 0 6px 0;color:var(--navy);}
+.cropper-box p{font-size:12.5px;color:var(--slate);margin:0 0 16px 0;}
+.cropper-stage{position:relative;margin:0 auto 16px auto;overflow:hidden;background:#111;touch-action:none;cursor:grab;}
+.cropper-stage:active{cursor:grabbing;}
+.cropper-stage canvas{display:block;}
+.cropper-mask{position:absolute;inset:0;pointer-events:none;box-shadow:0 0 0 2000px rgba(255,255,255,0.55);}
+.cropper-mask.circle{border-radius:50%;}
+#cropperZoom{width:100%;margin-bottom:16px;}
+.cropper-actions{display:flex;gap:10px;justify-content:center;}
 </style>
 </head>
 <body>
@@ -52,6 +64,22 @@ canvas{display:block;border:1px solid var(--line);max-width:100%;}
     </div>
   </div>
   <div class="state" id="stateMsg">Chargement du formulaire…</div>
+</div>
+
+<div class="cropper-overlay" id="cropperOverlay">
+  <div class="cropper-box">
+    <h3>Cadre ta photo</h3>
+    <p>Déplace l'image et utilise le curseur pour zoomer, jusqu'à ce qu'elle soit bien cadrée.</p>
+    <div class="cropper-stage" id="cropperStage">
+      <canvas id="cropperCanvas"></canvas>
+      <div class="cropper-mask" id="cropperMask"></div>
+    </div>
+    <input type="range" id="cropperZoom" min="1" max="3" step="0.01" value="1">
+    <div class="cropper-actions">
+      <button class="btn btn-outline" onclick="cancelCrop()">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmCrop()">Valider le cadrage</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -127,15 +155,128 @@ function buildFields(){
   holder.querySelectorAll('input[type=file]').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const file = e.target.files[0]; if(!file) return;
+      const field = form.fields.find(x=>x.id===inp.dataset.f);
       const reader = new FileReader();
-      reader.onload = ev=>{
-        const img = new Image();
-        img.onload = ()=>{ values[inp.dataset.f] = { imgObj: img, dataUri: ev.target.result }; drawPreview(); };
-        img.src = ev.target.result;
-      };
+      reader.onload = ev=>{ openCropper(field, ev.target.result, inp); };
       reader.readAsDataURL(file);
     });
   });
+}
+
+/* ---------------- Éditeur de recadrage (zoom + déplacement) ---------------- */
+const cropper = { field:null, img:null, inputEl:null, scale:1, baseScale:1, minScale:1, offsetX:0, offsetY:0, stageW:300, stageH:300, dragging:false, lastX:0, lastY:0 };
+
+function cropperAspect(field){
+  if(field.shape === 'circle') return 1;
+  const W = form.template.width || 800, H = form.template.height || 500;
+  const realW = field.w * W, realH = field.h * H;
+  return realW / realH;
+}
+
+function openCropper(field, dataUri, inputEl){
+  const img = new Image();
+  img.onload = ()=>{
+    cropper.field = field; cropper.img = img; cropper.inputEl = inputEl;
+    const aspect = cropperAspect(field);
+    const MAX = 300, MIN = 140;
+    if(aspect >= 1){ cropper.stageW = MAX; cropper.stageH = Math.max(MIN, Math.round(MAX/aspect)); }
+    else { cropper.stageH = MAX; cropper.stageW = Math.max(MIN, Math.round(MAX*aspect)); }
+
+    const canvas = document.getElementById('cropperCanvas');
+    canvas.width = cropper.stageW; canvas.height = cropper.stageH;
+    document.getElementById('cropperStage').style.width = cropper.stageW+'px';
+    document.getElementById('cropperStage').style.height = cropper.stageH+'px';
+    const mask = document.getElementById('cropperMask');
+    mask.className = 'cropper-mask' + (field.shape==='circle' ? ' circle' : '');
+
+    cropper.baseScale = Math.max(cropper.stageW/img.naturalWidth, cropper.stageH/img.naturalHeight);
+    cropper.minScale = cropper.baseScale;
+    cropper.scale = cropper.baseScale;
+    cropper.offsetX = (cropper.stageW - img.naturalWidth*cropper.scale)/2;
+    cropper.offsetY = (cropper.stageH - img.naturalHeight*cropper.scale)/2;
+
+    document.getElementById('cropperZoom').value = 1;
+    drawCropper();
+    document.getElementById('cropperOverlay').classList.add('show');
+  };
+  img.src = dataUri;
+}
+
+function clampCropperOffset(){
+  const iw = cropper.img.naturalWidth*cropper.scale, ih = cropper.img.naturalHeight*cropper.scale;
+  cropper.offsetX = Math.min(0, Math.max(cropper.stageW-iw, cropper.offsetX));
+  cropper.offsetY = Math.min(0, Math.max(cropper.stageH-ih, cropper.offsetY));
+}
+
+function drawCropper(){
+  const canvas = document.getElementById('cropperCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  clampCropperOffset();
+  const iw = cropper.img.naturalWidth*cropper.scale, ih = cropper.img.naturalHeight*cropper.scale;
+  ctx.drawImage(cropper.img, cropper.offsetX, cropper.offsetY, iw, ih);
+}
+
+function cropperPointerDown(x,y){ cropper.dragging=true; cropper.lastX=x; cropper.lastY=y; }
+function cropperPointerMove(x,y){
+  if(!cropper.dragging) return;
+  cropper.offsetX += (x-cropper.lastX); cropper.offsetY += (y-cropper.lastY);
+  cropper.lastX=x; cropper.lastY=y;
+  drawCropper();
+}
+function cropperPointerUp(){ cropper.dragging=false; }
+
+const cropperStageEl = document.getElementById('cropperStage');
+cropperStageEl.addEventListener('mousedown', e=>{ const r=cropperStageEl.getBoundingClientRect(); cropperPointerDown(e.clientX-r.left, e.clientY-r.top); });
+window.addEventListener('mousemove', e=>{ const r=cropperStageEl.getBoundingClientRect(); cropperPointerMove(e.clientX-r.left, e.clientY-r.top); });
+window.addEventListener('mouseup', cropperPointerUp);
+cropperStageEl.addEventListener('touchstart', e=>{ const r=cropperStageEl.getBoundingClientRect(); const t=e.touches[0]; cropperPointerDown(t.clientX-r.left, t.clientY-r.top); }, {passive:true});
+cropperStageEl.addEventListener('touchmove', e=>{ const r=cropperStageEl.getBoundingClientRect(); const t=e.touches[0]; cropperPointerMove(t.clientX-r.left, t.clientY-r.top); e.preventDefault(); }, {passive:false});
+cropperStageEl.addEventListener('touchend', cropperPointerUp);
+
+document.getElementById('cropperZoom').addEventListener('input', e=>{
+  const factor = parseFloat(e.target.value);
+  const oldScale = cropper.scale;
+  const newScale = cropper.minScale * factor;
+  // Zoom centré sur le milieu du cadre, pas sur le coin haut-gauche.
+  const cx = cropper.stageW/2, cy = cropper.stageH/2;
+  cropper.offsetX = cx - (cx-cropper.offsetX) * (newScale/oldScale);
+  cropper.offsetY = cy - (cy-cropper.offsetY) * (newScale/oldScale);
+  cropper.scale = newScale;
+  drawCropper();
+});
+
+function cancelCrop(){
+  document.getElementById('cropperOverlay').classList.remove('show');
+  if(cropper.inputEl) cropper.inputEl.value = '';
+}
+
+function confirmCrop(){
+  const f = cropper.field;
+  const W = form.template.width || 800, H = form.template.height || 500;
+  let outW = Math.max(1, Math.round(f.w * W));
+  let outH = Math.max(1, Math.round(f.h * H));
+  if(f.shape === 'circle') outW = outH = Math.min(outW, outH);
+  const MAXOUT = 900;
+  if(Math.max(outW,outH) > MAXOUT){ const s = MAXOUT/Math.max(outW,outH); outW = Math.round(outW*s); outH = Math.round(outH*s); }
+
+  const out = document.createElement('canvas');
+  out.width = outW; out.height = outH;
+  const ctx = out.getContext('2d');
+  if(f.shape === 'circle'){ ctx.save(); ctx.beginPath(); ctx.arc(outW/2, outH/2, Math.min(outW,outH)/2, 0, Math.PI*2); ctx.clip(); }
+  const rx = outW/cropper.stageW, ry = outH/cropper.stageH;
+  const iw = cropper.img.naturalWidth*cropper.scale*rx, ih = cropper.img.naturalHeight*cropper.scale*ry;
+  ctx.drawImage(cropper.img, cropper.offsetX*rx, cropper.offsetY*ry, iw, ih);
+  if(f.shape === 'circle') ctx.restore();
+
+  const dataUri = out.toDataURL('image/png');
+  const finalImg = new Image();
+  finalImg.onload = ()=>{
+    values[f.id] = { imgObj: finalImg, dataUri };
+    document.getElementById('cropperOverlay').classList.remove('show');
+    if(form.template.type==='docx') scheduleDocxLivePreview(); else drawPreview();
+  };
+  finalImg.src = dataUri;
 }
 
 function templateSize(){
@@ -160,10 +301,14 @@ function drawPreview(){
       let dx=cx; if(f.align==='left') dx=cx-(f.w*w)/2; if(f.align==='right') dx=cx+(f.w*w)/2;
       ctx.fillText((v!==undefined && v!=='') ? v : (f.sample||f.name), dx, cy);
     } else {
-      const bw=f.w*w, bh=f.h*h;
+      let bw=f.w*w, bh=f.h*h;
+      if(f.type==='image' && f.shape==='circle'){ bw = bh = Math.min(bw,bh); } // un cercle reste un cercle
       if(v && v.imgObj){ ctx.drawImage(v.imgObj, cx-bw/2, cy-bh/2, bw, bh); }
       else {
-        ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]); ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh); ctx.setLineDash([]);
+        ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]);
+        if(f.type==='image' && f.shape==='circle'){ ctx.beginPath(); ctx.arc(cx,cy,bw/2,0,Math.PI*2); ctx.stroke(); }
+        else { ctx.strokeRect(cx-bw/2,cy-bh/2,bw,bh); }
+        ctx.setLineDash([]);
         ctx.fillStyle='#B8862B'; ctx.font='12px Inter'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('Photo', cx, cy);
       }
     }
