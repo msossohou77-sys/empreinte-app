@@ -131,7 +131,7 @@ function buildFields(){
   const holder = document.getElementById('fieldsHolder');
   holder.innerHTML = '';
   form.fields.forEach(f=>{
-    if(f.type==='qrcode') return; // généré automatiquement, jamais saisi par l'utilisateur
+    if(f.type==='qrcode' || f.type==='reference') return; // générés automatiquement, jamais saisis par l'utilisateur
     const wrap = document.createElement('div');
     if(f.type==='text'){
       wrap.innerHTML = `<label>${f.name}</label><input type="text" data-f="${f.id}" placeholder="${f.sample||''}">`;
@@ -295,11 +295,21 @@ function drawPreview(){
     if(f.type==='qrcode') return; // aperçu non pertinent avant génération réelle
     const cx=f.x*w, cy=f.y*h;
     const v = values[f.id];
-    if(f.type==='text'){
+    if(f.type==='text' || f.type==='reference'){
       const fontPx = f.fontSize*w;
-      ctx.font = fontPx+'px Georgia'; ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
+      const family = f.fontFamily || 'Georgia';
+      ctx.font = `${f.italic?'italic ':''}${f.bold?'bold ':''}${fontPx}px "${family}"`;
+      ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
       let dx=cx; if(f.align==='left') dx=cx-(f.w*w)/2; if(f.align==='right') dx=cx+(f.w*w)/2;
-      ctx.fillText((v!==undefined && v!=='') ? v : (f.sample||f.name), dx, cy);
+      const text = (f.type==='text' && v!==undefined && v!=='') ? v : (f.sample||f.name);
+      ctx.fillText(text, dx, cy);
+      if(f.underline){
+        const tw = ctx.measureText(text).width;
+        let lx = dx; if(f.align==='center') lx = dx - tw/2; if(f.align==='right') lx = dx - tw;
+        const ly = cy + fontPx*0.35;
+        ctx.strokeStyle = f.color; ctx.lineWidth = Math.max(1, fontPx*0.05);
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+tw, ly); ctx.stroke();
+      }
     } else {
       let bw=f.w*w, bh=f.h*h;
       if(f.type==='image' && f.shape==='circle'){ bw = bh = Math.min(bw,bh); } // un cercle reste un cercle
