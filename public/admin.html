@@ -71,6 +71,15 @@ canvas{display:block;}
 .inspector-row input,.inspector-row select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-size:13px;font-family:inherit;}
 .inspector-inline{display:flex;gap:10px;} .inspector-inline>div{flex:1;}
 .swatches{display:flex;gap:6px;}
+.style-toggles{display:flex;gap:14px;font-size:12.5px;}
+.style-toggles label{display:flex;align-items:center;gap:5px;font-weight:400;color:var(--ink);cursor:pointer;}
+.ref-panel{background:#fff;border:1px solid var(--line);border-left:3px solid var(--brass);padding:14px 18px;max-width:640px;margin-bottom:22px;}
+.ref-toggle{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13.5px;}
+.ref-modes{display:flex;flex-direction:column;gap:6px;margin:12px 0 8px 0;font-size:13px;}
+.ref-modes label{display:flex;align-items:center;gap:8px;cursor:pointer;}
+#refPrefixRow{margin-top:6px;}
+#refPrefixRow input{padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-size:13px;width:200px;margin-right:10px;}
+.ref-prefix-hint{font-size:11.5px;color:var(--slate);}
 .swatch{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;}
 .swatch.active{border-color:var(--navy);}
 .link-card{background:#fff;border:1px solid var(--line);padding:16px 18px;max-width:520px;margin-bottom:12px;}
@@ -187,6 +196,23 @@ table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
       </div>
 
       <div class="panel active" id="panel-mapping">
+        <div class="ref-panel" id="referencePanel">
+          <label class="ref-toggle">
+            <input type="checkbox" id="refEnabled" onchange="toggleReference()">
+            <strong>Afficher un numéro de référence sur le document final</strong>
+          </label>
+          <div id="refOptions" style="display:none;">
+            <div class="ref-modes">
+              <label><input type="radio" name="refMode" value="auto" id="refModeAuto" onchange="setReferenceMode('auto')"> Génération 100% automatique</label>
+              <label><input type="radio" name="refMode" value="custom" id="refModeCustom" onchange="setReferenceMode('custom')"> Préfixe personnalisé + numéro de série</label>
+            </div>
+            <div id="refPrefixRow" style="display:none;">
+              <input type="text" id="refPrefix" placeholder="Ex. DOC-RH" maxlength="30" oninput="scheduleReferencePrefixSave()">
+              <span class="ref-prefix-hint">Donnera par exemple : <strong id="refPrefixExample">DOC-RH-0014</strong></span>
+            </div>
+            <p class="import-help" style="margin:10px 0 0 0;">Le bloc de référence est ajouté comme un champ que tu peux glisser-déposer, redimensionner et mettre en forme ci-dessous, exactement comme les autres.</p>
+          </div>
+        </div>
         <div class="workspace" id="imageWorkspace">
           <div>
             <div class="canvas-toolbar">
@@ -326,14 +352,36 @@ function fieldTypeSpecificInspectorHtml(f, prefix){
       </select></div>
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">L'utilisateur final pourra zoomer/déplacer sa photo pour bien la cadrer avant de l'envoyer.</div>`;
   }
-  // texte
-  return `<div class="inspector-row inspector-inline">
+  // texte (et référence, qui partage les mêmes contrôles de mise en forme)
+  const fontOptions = WEB_SAFE_FONTS.map(name=>`<option value="${name}" ${f.fontFamily===name?'selected':''}>${name}</option>`).join('');
+  const customOptions = customFonts.map(cf=>`<option value="${escapeHtml(cf.family)}" ${f.fontFamily===cf.family?'selected':''}>${escapeHtml(cf.family)} (perso)</option>`).join('');
+  return `<div class="inspector-row">
+      <label>Police</label>
+      <select id="${prefix}-font">
+        <option value="" ${!f.fontFamily?'selected':''}>Par défaut (Georgia)</option>
+        ${fontOptions}
+        ${customOptions}
+      </select>
+    </div>
+    <div class="inspector-row" id="${prefix}-localfont-row">
+      <button type="button" class="btn btn-outline btn-sm" onclick="browseLocalFonts('${prefix}')">+ Utiliser une police installée sur cet appareil</button>
+      <div style="font-size:11px;color:var(--slate);margin-top:5px;">Fonctionne sur Chrome/Edge (ordinateur). La police est copiée sur le serveur pour apparaître dans le document final généré par les utilisateurs.</div>
+    </div>
+    <div class="inspector-row inspector-inline">
       <div><label>Taille du texte (% largeur)</label><input type="number" id="${prefix}-size" value="${(f.fontSize*100).toFixed(1)}" min="0.5" max="15" step="0.5"></div>
       <div><label>Alignement</label><select id="${prefix}-align">
         <option value="left" ${f.align==='left'?'selected':''}>Gauche</option>
         <option value="center" ${f.align==='center'?'selected':''}>Centre</option>
         <option value="right" ${f.align==='right'?'selected':''}>Droite</option>
       </select></div>
+    </div>
+    <div class="inspector-row">
+      <label>Style</label>
+      <div class="style-toggles">
+        <label><input type="checkbox" id="${prefix}-bold" ${f.bold?'checked':''}> Gras</label>
+        <label><input type="checkbox" id="${prefix}-italic" ${f.italic?'checked':''}> Italique</label>
+        <label><input type="checkbox" id="${prefix}-underline" ${f.underline?'checked':''}> Souligné</label>
+      </div>
     </div>
     <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>`;
 }
@@ -346,7 +394,126 @@ function wireFieldTypeSpecificInspector(holder, f, prefix, rerenderInspector, re
   holder.querySelectorAll('.swatch').forEach(sw=>sw.onclick=()=>{ f.color=sw.dataset.c; rerenderInspector(); });
   const shapeInput = holder.querySelector('#'+prefix+'-shape');
   if(shapeInput) shapeInput.onchange = e=>{ f.shape=e.target.value; redrawOnly(); };
+  const fontInput = holder.querySelector('#'+prefix+'-font');
+  if(fontInput) fontInput.onchange = e=>{ f.fontFamily = e.target.value || undefined; redrawOnly(); };
+  const boldInput = holder.querySelector('#'+prefix+'-bold');
+  if(boldInput) boldInput.onchange = e=>{ f.bold = e.target.checked; redrawOnly(); };
+  const italicInput = holder.querySelector('#'+prefix+'-italic');
+  if(italicInput) italicInput.onchange = e=>{ f.italic = e.target.checked; redrawOnly(); };
+  const underlineInput = holder.querySelector('#'+prefix+'-underline');
+  if(underlineInput) underlineInput.onchange = e=>{ f.underline = e.target.checked; redrawOnly(); };
 }
+
+/* ---------------- Numéro de référence auto-incrémenté ---------------- */
+function refreshFieldViewsForCurrentType(){
+  if(current.type==='docx'){ renderDocxPositionedList(); drawDocxMapCanvas(); }
+  else { renderFieldList(); drawMapCanvas(); }
+}
+
+function loadReferencePanel(){
+  const refField = current.fields.find(f=>f.type==='reference');
+  document.getElementById('refEnabled').checked = !!refField;
+  document.getElementById('refOptions').style.display = refField ? 'block' : 'none';
+  const mode = current.referenceMode || 'auto';
+  document.getElementById('refModeAuto').checked = mode==='auto';
+  document.getElementById('refModeCustom').checked = mode==='custom';
+  document.getElementById('refPrefixRow').style.display = mode==='custom' ? 'block' : 'none';
+  document.getElementById('refPrefix').value = current.referencePrefix || '';
+  document.getElementById('refPrefixExample').textContent = (current.referencePrefix||'DOC') + '-0014';
+}
+
+function toggleReference(){
+  const enabled = document.getElementById('refEnabled').checked;
+  document.getElementById('refOptions').style.display = enabled ? 'block' : 'none';
+  let refField = current.fields.find(f=>f.type==='reference');
+  if(enabled && !refField){
+    refField = { id:'tmp-ref-'+Date.now(), name:'Référence', type:'reference', x:0.85, y:0.93, w:0.25, h:0.05, fontSize:0.02, color:'#8A93A6', align:'center', sample:'REF-0001' };
+    current.fields.push(refField);
+    if(!document.getElementById('refModeAuto').checked && !document.getElementById('refModeCustom').checked){
+      document.getElementById('refModeAuto').checked = true;
+    }
+  } else if(!enabled && refField){
+    current.fields = current.fields.filter(f=>f.type!=='reference');
+  }
+  refreshFieldViewsForCurrentType();
+  saveFields();
+  saveReferenceSettings();
+}
+
+function setReferenceMode(mode){
+  document.getElementById('refPrefixRow').style.display = mode==='custom' ? 'block' : 'none';
+  saveReferenceSettings();
+}
+
+let refPrefixTimer = null;
+function scheduleReferencePrefixSave(){
+  const val = document.getElementById('refPrefix').value.trim();
+  document.getElementById('refPrefixExample').textContent = (val||'DOC') + '-0014';
+  clearTimeout(refPrefixTimer);
+  refPrefixTimer = setTimeout(saveReferenceSettings, 700);
+}
+
+async function saveReferenceSettings(){
+  const mode = document.getElementById('refModeCustom').checked ? 'custom' : 'auto';
+  const prefix = document.getElementById('refPrefix').value.trim();
+  const res = await fetch(`/api/templates/${current.id}/integrations`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ webhookUrl: current.webhookUrl || '', docxPreviewEnabled: !!current.docxPreviewEnabled, referenceMode: mode, referencePrefix: prefix })
+  });
+  const data = await res.json();
+  current.referenceMode = data.referenceMode; current.referencePrefix = data.referencePrefix;
+}
+
+/* ---------------- Polices personnalisées (web-safe + Local Font Access) ---------------- */
+const WEB_SAFE_FONTS = ['Arial','Helvetica','Verdana','Tahoma','Trebuchet MS','Times New Roman','Georgia','Courier New'];
+let customFonts = []; // [{id, family}] chargées depuis le serveur au démarrage
+let pendingInspectorField = null; // champ dont l'inspecteur est ouvert, pour rafraîchir après ajout de police
+
+async function loadCustomFonts(){
+  try{
+    const res = await fetch('/api/fonts');
+    if(res.ok) customFonts = await res.json();
+  }catch(e){ /* liste vide si indisponible */ }
+}
+
+async function browseLocalFonts(prefix){
+  if(!('queryLocalFonts' in window)){
+    showToast("Cette fonctionnalité n'est disponible que sur Chrome ou Edge, sur ordinateur.");
+    return;
+  }
+  let fontsList;
+  try{
+    fontsList = await window.queryLocalFonts();
+  }catch(e){
+    showToast("Accès aux polices refusé ou indisponible.");
+    return;
+  }
+  if(!fontsList || fontsList.length===0){ showToast('Aucune police trouvée.'); return; }
+
+  // Liste déroulante temporaire pour choisir parmi les polices locales détectées.
+  const uniqueFamilies = [...new Set(fontsList.map(f=>f.family))].sort();
+  const choice = prompt('Polices détectées sur ton appareil (recopie exactement un nom ci-dessous) :\n\n' + uniqueFamilies.slice(0,40).join(', '));
+  if(!choice) return;
+  const match = fontsList.find(f=>f.family===choice);
+  if(!match){ showToast('Police non trouvée dans la liste.'); return; }
+
+  showToast('Import de la police en cours…');
+  try{
+    const blob = await match.blob();
+    const buf = await blob.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const dataUri = 'data:font/ttf;base64,' + base64;
+    const res = await fetch('/api/fonts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ family: match.family, fontDataUri: dataUri }) });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || "Échec de l'import de la police"); return; }
+    await loadCustomFonts();
+    showToast('Police "'+match.family+'" ajoutée — sélectionne-la dans le menu Police.');
+    if(pendingInspectorField && pendingInspectorField.rerender) pendingInspectorField.rerender();
+  }catch(e){
+    showToast("Échec de l'import de la police (fichier trop volumineux ou illisible).");
+  }
+}
+
 const DISPLAY_W = 640;
 let templates = [];
 let current = null; // full template detail incl. fields/links
@@ -413,6 +580,7 @@ async function boot(){
   document.getElementById('appRoot').style.display = 'flex';
   document.getElementById('userEmail').textContent = user.email;
   document.getElementById('apiKeyDisplay').value = user.apiKey;
+  loadCustomFonts();
   loadTemplates();
 }
 
@@ -545,6 +713,7 @@ async function selectTemplate(templateId){
   selectedFieldId = null;
   document.getElementById('uploadPanel').style.display = 'none';
   document.getElementById('tplPanel').style.display = 'block';
+  loadReferencePanel();
   const badges = { psd: 'Importé depuis PSD', docx: 'Document Word', upload: '' };
   const badge = badges[current.sourceType] ? `<span class="source-badge">${badges[current.sourceType]}</span>` : '';
   document.getElementById('tplTitle').innerHTML = escapeHtml(current.name) + badge;
@@ -678,6 +847,7 @@ function renderDocxPositionedInspector(){
       ${fieldTypeSpecificInspectorHtml(f, 'dinsp')}
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur l'aperçu pour le repositionner.</div>
     </div>`;
+  pendingInspectorField = { rerender: ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); } };
   wireFieldTypeSpecificInspector(holder, f, 'dinsp', ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); }, ()=>{ renderDocxPositionedList(); drawDocxMapCanvas(); });
   holder.querySelector('#dinsp-name').oninput = e=>{ f.name=e.target.value; renderDocxPositionedList(); drawDocxMapCanvas(); };
   holder.querySelector('#dinsp-type').onchange = e=>{
@@ -707,8 +877,8 @@ function drawDocxMapCanvas(){
   docxPositionedFields().forEach(f=>{
     drawFieldOnCtx(ctx,f,w,h);
     if(f.id===docxSelectedFieldId){
-      const bw = f.type==='text' ? Math.max(f.w*w,40) : f.w*w;
-      const bh = f.type==='text' ? f.fontSize*w*1.4 : f.h*h;
+      const bw = (f.type==='text'||f.type==='reference') ? Math.max(f.w*w,40) : f.w*w;
+      const bh = (f.type==='text'||f.type==='reference') ? f.fontSize*w*1.4 : f.h*h;
       ctx.strokeStyle='#B8862B'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
       ctx.strokeRect(f.x*w-bw/2, f.y*h-bh/2, bw, bh); ctx.setLineDash([]);
     }
@@ -861,6 +1031,7 @@ function renderInspector(){
       ${fieldTypeSpecificInspectorHtml(f, 'insp')}
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur le document pour le repositionner.</div>
     </div>`;
+  pendingInspectorField = { rerender: ()=>{ renderInspector(); drawMapCanvas(); } };
   wireFieldTypeSpecificInspector(holder, f, 'insp', ()=>{ renderInspector(); drawMapCanvas(); }, ()=>{ renderFieldList(); drawMapCanvas(); });
   holder.querySelector('#insp-name').oninput = e=>{ f.name=e.target.value; renderFieldList(); drawMapCanvas(); };
   holder.querySelector('#insp-type').onchange = e=>{
@@ -882,11 +1053,21 @@ function templateSize(){
 }
 function drawFieldOnCtx(ctx, f, w, h){
   const cx=f.x*w, cy=f.y*h;
-  if(f.type==='text'){
+  if(f.type==='text' || f.type==='reference'){
     const fontPx = f.fontSize*w;
-    ctx.font = fontPx+'px Georgia'; ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
+    const family = f.fontFamily || 'Georgia';
+    ctx.font = `${f.italic?'italic ':''}${f.bold?'bold ':''}${fontPx}px "${family}"`;
+    ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
     let dx = cx; if(f.align==='left') dx = cx-(f.w*w)/2; if(f.align==='right') dx = cx+(f.w*w)/2;
-    ctx.fillText(f.sample||f.name, dx, cy);
+    const text = f.sample||f.name;
+    ctx.fillText(text, dx, cy);
+    if(f.underline){
+      const tw = ctx.measureText(text).width;
+      let lx = dx; if(f.align==='center') lx = dx - tw/2; if(f.align==='right') lx = dx - tw;
+      const ly = cy + fontPx*0.35;
+      ctx.strokeStyle = f.color; ctx.lineWidth = Math.max(1, fontPx*0.05);
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+tw, ly); ctx.stroke();
+    }
   } else {
     const bw=f.w*w, bh=f.h*h;
     const isCircle = f.type==='image' && f.shape==='circle';
@@ -911,16 +1092,17 @@ function drawMapCanvas(){
   current.fields.forEach(f=>{
     drawFieldOnCtx(ctx,f,w,h);
     if(f.id===selectedFieldId){
-      const bw = f.type==='text' ? Math.max(f.w*w,40) : f.w*w;
-      const bh = f.type==='text' ? f.fontSize*w*1.4 : f.h*h;
+      const bw = (f.type==='text'||f.type==='reference') ? Math.max(f.w*w,40) : f.w*w;
+      const bh = (f.type==='text'||f.type==='reference') ? f.fontSize*w*1.4 : f.h*h;
       ctx.strokeStyle='#B8862B'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
       ctx.strokeRect(f.x*w-bw/2, f.y*h-bh/2, bw, bh); ctx.setLineDash([]);
     }
   });
 }
 function fieldHitTest(f,mx,my,w,h){
-  const bw = f.type==='text' ? Math.max(f.w*w,60) : f.w*w;
-  const bh = f.type==='text' ? f.fontSize*w*1.5 : f.h*h;
+  const isTextLike = f.type==='text' || f.type==='reference';
+  const bw = isTextLike ? Math.max(f.w*w,60) : f.w*w;
+  const bh = isTextLike ? f.fontSize*w*1.5 : f.h*h;
   const cx=f.x*w, cy=f.y*h;
   return mx>cx-bw/2 && mx<cx+bw/2 && my>cy-bh/2 && my<cy+bh/2;
 }
