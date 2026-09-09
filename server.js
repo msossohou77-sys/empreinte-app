@@ -7,6 +7,7 @@ const sharp = require('sharp');
 const db = require('./lib/db');
 const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
+const fontsLib = require('./lib/fonts');
 const { renderPng, pngToJpeg, pngToPdf } = require('./lib/render');
 const { analyzePsd } = require('./lib/psd');
 const { extractFields: extractDocxFields, renderDocx } = require('./lib/docx_render');
@@ -16,9 +17,15 @@ const ROOT = __dirname;
 const UPLOADS_DIR = path.join(ROOT, 'data', 'uploads');
 const RENDERS_DIR = path.join(ROOT, 'data', 'renders');
 const WORK_DIR = path.join(ROOT, 'data', 'work');
+const FONTS_DIR = path.join(ROOT, 'data', 'fonts');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(RENDERS_DIR, { recursive: true });
 fs.mkdirSync(WORK_DIR, { recursive: true });
+fs.mkdirSync(FONTS_DIR, { recursive: true });
+
+// Polices "web-safe" proposées dans l'éditeur — toute autre valeur de fontFamily
+// est considérée comme une police personnalisée uploadée par l'administrateur.
+const WEB_SAFE_FONTS = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Times New Roman', 'Georgia', 'Courier New'];
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf',
@@ -152,8 +159,13 @@ async function saveIntegrations(req, res, templateId, user) {
   }
   const patch = { webhookUrl: webhookUrl || null };
   if (typeof body.docxPreviewEnabled === 'boolean') patch.docxPreviewEnabled = body.docxPreviewEnabled;
+  if (body.referenceMode === 'auto' || body.referenceMode === 'custom') patch.referenceMode = body.referenceMode;
+  if (typeof body.referencePrefix === 'string') patch.referencePrefix = body.referencePrefix.trim().slice(0, 30);
   const updated = db.update('templates', templateId, patch);
-  sendJson(res, 200, { webhookUrl: updated.webhookUrl, docxPreviewEnabled: !!updated.docxPreviewEnabled });
+  sendJson(res, 200, {
+    webhookUrl: updated.webhookUrl, docxPreviewEnabled: !!updated.docxPreviewEnabled,
+    referenceMode: updated.referenceMode || 'auto', referencePrefix: updated.referencePrefix || ''
+  });
 }
 
 // Sépare les champs Word en deux catégories : "texte de substitution" ({{Nom}},
@@ -164,16 +176,57 @@ function splitDocxFields(fields) {
   const positionedFields = fields.filter(f => f.x !== undefined && f.x !== null);
   return { nameFields, positionedFields };
 }
-function buildDocxValueMaps(fields, valuesById, verifyUrl) {
+function buildDocxValueMaps(fields, valuesById, verifyUrl, referenceText) {
   const { nameFields, positionedFields } = splitDocxFields(fields);
   const valuesByName = {};
   nameFields.forEach(f => { valuesByName[f.name] = valuesById[f.id] || ''; });
   const positionedValues = {};
   positionedFields.forEach(f => {
     if (f.type === 'qrcode') { if (verifyUrl) positionedValues[f.id] = verifyUrl; }
+    else if (f.type === 'reference') { positionedValues[f.id] = referenceText || f.sample || 'REF-0001'; }
     else positionedValues[f.id] = valuesById[f.id] || '';
   });
   return { valuesByName, positionedFields, positionedValues };
+}
+
+// Rassemble les fichiers de police personnalisés (Local Font Access) réellement
+// utilisés par les champs texte/référence d'un modèle, pour les passer au
+// moteur de superposition PDF (lib/docx_overlay.js).
+function loadCustomFontFiles(ownerId, fields) {
+  const families = new Set();
+  fields.forEach(f => { if ((f.type === 'text' || f.type === 'reference') && f.fontFamily && !WEB_SAFE_FONTS.includes(f.fontFamily)) families.add(f.fontFamily); });
+  if (families.size === 0) return {};
+  const userFonts = fontsLib.listCustomFonts(ownerId);
+  const result = {};
+  families.forEach(family => {
+    const record = userFonts.find(fnt => fnt.family === family);
+    if (record) {
+      try { result[family] = fs.readFileSync(path.join(FONTS_DIR, record.filename)); } catch (e) { /* police introuvable, repli sur police standard */ }
+    }
+  });
+  return result;
+}
+
+// Polices personnalisées (Local Font Access, cahier des charges — amélioration
+// typographie) : upload, liste et suppression, propres à chaque compte.
+async function uploadCustomFont(req, res, user) {
+  const body = await readJsonBody(req);
+  if (!body.family || !body.fontDataUri) return sendJson(res, 400, { error: 'Nom de police et fichier requis.' });
+  if (WEB_SAFE_FONTS.includes(body.family)) return sendJson(res, 400, { error: 'Ce nom correspond déjà à une police web-safe intégrée.' });
+  try {
+    const record = fontsLib.saveCustomFont(FONTS_DIR, user.id, body.family, body.fontDataUri);
+    sendJson(res, 201, { id: record.id, family: record.family });
+  } catch (e) {
+    sendJson(res, 400, { error: e.message });
+  }
+}
+function listCustomFontsHandler(req, res, user) {
+  sendJson(res, 200, fontsLib.listCustomFonts(user.id).map(f => ({ id: f.id, family: f.family })));
+}
+function deleteCustomFontHandler(req, res, fontId, user) {
+  const ok = fontsLib.deleteCustomFont(FONTS_DIR, fontId, user.id);
+  if (!ok) return sendJson(res, 404, { error: 'Police introuvable' });
+  sendJson(res, 200, { ok: true });
 }
 
 // Aperçu en direct pour un modèle Word (facultatif, coûteux : déclenche une vraie
@@ -186,10 +239,11 @@ async function previewDocxAdmin(req, res, templateId, user) {
   if (template.type !== 'docx') return sendJson(res, 400, { error: 'Aperçu disponible uniquement pour les modèles Word.' });
   const body = await readJsonBody(req);
   const fields = db.filter('template_fields', f => f.templateId === templateId);
-  const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu');
+  const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', null);
+  const customFontFiles = loadCustomFontFiles(user.id, fields);
   const workDir = path.join(WORK_DIR, 'preview-' + id());
   try {
-    const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues });
+    const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues, customFontFiles });
     // On mémorise la taille réelle de la page rendue : utile côté client pour
     // calculer le bon ratio d'un cadre photo (cercle, recadrage) sur un modèle Word.
     const meta = await sharp(pngBuffer).metadata();
@@ -467,6 +521,7 @@ async function saveFields(req, res, templateId, user) {
     x: f.x, y: f.y, w: f.w, h: f.h,
     fontSize: f.fontSize, color: f.color, align: f.align,
     shape: f.shape,
+    fontFamily: f.fontFamily, bold: !!f.bold, italic: !!f.italic, underline: !!f.underline,
     sample: f.sample || ''
   }));
   db.replaceWhere('template_fields', f => f.templateId === templateId, fields);
@@ -501,15 +556,32 @@ function getPublicForm(req, res, token) {
   });
 }
 
+// Numéro de référence auto-incrémenté (une case à cocher qui ajoute un champ de
+// type "reference" au modèle). Le compteur est stocké sur le modèle lui-même et
+// incrémenté à CHAQUE génération réelle (jamais lors d'un simple aperçu).
+function computeReferenceText(template) {
+  const seq = (template.referenceSeq || 0) + 1;
+  db.update('templates', template.id, { referenceSeq: seq });
+  const padded = String(seq).padStart(4, '0');
+  if (template.referenceMode === 'custom' && template.referencePrefix) {
+    return `${template.referencePrefix}-${padded}`;
+  }
+  return `REF-${padded}`;
+}
+
 async function buildRender(templateId, fields, values, options = {}) {
   const template = db.find('templates', t => t.id === templateId);
   const templatePath = path.join(UPLOADS_DIR, template.filename);
   const renderId = id();
 
+  const refField = fields.find(f => f.type === 'reference');
+  const referenceText = refField ? computeReferenceText(template) : null;
+
   if (template.type === 'docx') {
-    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, values, options.verifyUrl);
+    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, values, options.verifyUrl, referenceText);
+    const customFontFiles = loadCustomFontFiles(template.ownerId, fields);
     const workDir = path.join(WORK_DIR, 'render-' + renderId);
-    const { pdfBuffer, pngBuffer } = await renderDocx(templatePath, valuesByName, workDir, { positionedFields, positionedValues });
+    const { pdfBuffer, pngBuffer } = await renderDocx(templatePath, valuesByName, workDir, { positionedFields, positionedValues, customFontFiles });
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.writeFileSync(path.join(RENDERS_DIR, renderId + '.pdf'), pdfBuffer);
     fs.writeFileSync(path.join(RENDERS_DIR, renderId + '.png'), pngBuffer);
@@ -520,11 +592,13 @@ async function buildRender(templateId, fields, values, options = {}) {
     if (options.verifyUrl) {
       fields.filter(f => f.type === 'qrcode').forEach(f => { qrValues[f.id] = options.verifyUrl; });
     }
-    const pngBuffer = await renderPng(templatePath, fields, values, { qrValues });
+    const renderValues = { ...values };
+    if (refField && referenceText) renderValues[refField.id] = referenceText;
+    const pngBuffer = await renderPng(templatePath, fields, renderValues, { qrValues });
     fs.writeFileSync(path.join(RENDERS_DIR, renderId + '.png'), pngBuffer);
   }
 
-  const render = { id: renderId, templateId, createdAt: new Date().toISOString() };
+  const render = { id: renderId, templateId, referenceText, createdAt: new Date().toISOString() };
   db.insert('renders', render);
   return render;
 }
@@ -538,10 +612,11 @@ async function previewPublic(req, res, token) {
 
   if (template.type === 'docx') {
     if (!template.docxPreviewEnabled) return sendJson(res, 400, { error: "Aperçu non activé pour ce modèle — génère le document pour le voir." });
-    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu');
+    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', null);
+    const customFontFiles = loadCustomFontFiles(template.ownerId, fields);
     const workDir = path.join(WORK_DIR, 'preview-' + id());
     try {
-      const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues });
+      const { pngBuffer } = await renderDocx(path.join(UPLOADS_DIR, template.filename), valuesByName, workDir, { positionedFields, positionedValues, customFontFiles });
       return sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
     } catch (e) {
       return sendJson(res, 500, { error: "Impossible de générer l'aperçu : " + e.message });
@@ -769,6 +844,9 @@ const server = http.createServer(async (req, res) => {
     if ((match = /^\/api\/templates\/([^/]+)\/stats$/.exec(p)) && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return computeStats(req, res, match[1], u); }
     if ((match = /^\/api\/templates\/([^/]+)\/stats\/export\.csv$/.exec(p)) && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return exportStatsCsv(req, res, match[1], u); }
     if (p === '/api/auth/api-key/regenerate' && m === 'POST') { const u = requireAuth(req, res); if (!u) return; return regenerateApiKeyHandler(req, res, u); }
+    if (p === '/api/fonts' && m === 'POST') { const u = requireAuth(req, res); if (!u) return; return await uploadCustomFont(req, res, u); }
+    if (p === '/api/fonts' && m === 'GET') { const u = requireAuth(req, res); if (!u) return; return listCustomFontsHandler(req, res, u); }
+    if ((match = /^\/api\/fonts\/([^/]+)$/.exec(p)) && m === 'DELETE') { const u = requireAuth(req, res); if (!u) return; return deleteCustomFontHandler(req, res, match[1], u); }
 
     // ---- API publique v1 (intégrations tierces, authentifiée par clé API — Phase 4) ----
     if (p === '/api/v1/templates' && m === 'GET') { const u = requireApiKey(req, res); if (!u) return; return listTemplates(req, res, u); }
