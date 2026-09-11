@@ -521,6 +521,7 @@ async function saveFields(req, res, templateId, user) {
     x: f.x, y: f.y, w: f.w, h: f.h,
     fontSize: f.fontSize, color: f.color, align: f.align,
     shape: f.shape,
+    borderEnabled: !!f.borderEnabled, borderColor: f.borderColor, borderWidth: f.borderWidth,
     fontFamily: f.fontFamily, bold: !!f.bold, italic: !!f.italic, underline: !!f.underline,
     sample: f.sample || ''
   }));
