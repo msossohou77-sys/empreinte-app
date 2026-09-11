@@ -313,7 +313,15 @@ function drawPreview(){
     } else {
       let bw=f.w*w, bh=f.h*h;
       if(f.type==='image' && f.shape==='circle'){ bw = bh = Math.min(bw,bh); } // un cercle reste un cercle
-      if(v && v.imgObj){ ctx.drawImage(v.imgObj, cx-bw/2, cy-bh/2, bw, bh); }
+      if(v && v.imgObj){
+        ctx.drawImage(v.imgObj, cx-bw/2, cy-bh/2, bw, bh);
+        if(f.type==='image' && f.borderEnabled){
+          const bwidth = Math.max(1, (f.borderWidth||0.006)*w);
+          ctx.strokeStyle = f.borderColor || '#1B2340'; ctx.lineWidth = bwidth;
+          if(f.shape==='circle'){ ctx.beginPath(); ctx.arc(cx,cy,bw/2-bwidth/2,0,Math.PI*2); ctx.stroke(); }
+          else { ctx.strokeRect(cx-bw/2+bwidth/2, cy-bh/2+bwidth/2, bw-bwidth, bh-bwidth); }
+        }
+      }
       else {
         ctx.strokeStyle='#B8862B'; ctx.setLineDash([4,3]);
         if(f.type==='image' && f.shape==='circle'){ ctx.beginPath(); ctx.arc(cx,cy,bw/2,0,Math.PI*2); ctx.stroke(); }
