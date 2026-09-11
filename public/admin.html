@@ -342,7 +342,9 @@ const COLORS = ['#23262F','#B8862B','#A6423B','#3E6B4F','#1B2340'];
 // partagée entre l'éditeur d'images/PSD et l'éditeur de champs positionnés Word.
 function fieldTypeSpecificInspectorHtml(f, prefix){
   if(f.type === 'qrcode'){
-    return `<div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>`;
+    return `<div class="inspector-row"><label>Taille (<span id="${prefix}-sizeslider-val">${Math.round(f.w*100)}</span>% de la largeur)</label>
+      <input type="range" id="${prefix}-sizeslider" min="3" max="45" step="1" value="${Math.round(f.w*100)}"></div>
+      <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Ce champ est généré automatiquement (lien de vérification unique par soumission) — l'utilisateur final ne le remplit pas.</div>`;
   }
   if(f.type === 'image'){
     return `<div class="inspector-row"><label>Forme du cadre</label>
@@ -350,6 +352,17 @@ function fieldTypeSpecificInspectorHtml(f, prefix){
         <option value="rect" ${(!f.shape || f.shape==='rect')?'selected':''}>Rectangle</option>
         <option value="circle" ${f.shape==='circle'?'selected':''}>Cercle</option>
       </select></div>
+      <div class="inspector-row"><label>Taille (<span id="${prefix}-sizeslider-val">${Math.round(f.w*100)}</span>% de la largeur)</label>
+      <input type="range" id="${prefix}-sizeslider" min="3" max="45" step="1" value="${Math.round(f.w*100)}"></div>
+      <div class="inspector-row">
+        <label><input type="checkbox" id="${prefix}-border-enabled" ${f.borderEnabled?'checked':''}> Ajouter une bordure au cadre</label>
+      </div>
+      <div id="${prefix}-border-options" style="${f.borderEnabled?'':'display:none;'}">
+        <div class="inspector-row inspector-inline">
+          <div><label>Couleur de la bordure</label><input type="color" id="${prefix}-border-color" value="${f.borderColor||'#1B2340'}"></div>
+          <div><label>Épaisseur (<span id="${prefix}-border-width-val">${Math.round((f.borderWidth||0.006)*1000)}</span>)</label><input type="range" id="${prefix}-border-width" min="1" max="25" step="1" value="${Math.round((f.borderWidth||0.006)*1000)}"></div>
+        </div>
+      </div>
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">L'utilisateur final pourra zoomer/déplacer sa photo pour bien la cadrer avant de l'envoyer.</div>`;
   }
   // texte (et référence, qui partage les mêmes contrôles de mise en forme)
@@ -386,7 +399,7 @@ function fieldTypeSpecificInspectorHtml(f, prefix){
     <div class="inspector-row"><label>Couleur</label><div class="swatches">${COLORS.map(c=>`<span class="swatch ${f.color===c?'active':''}" style="background:${c}" data-c="${c}"></span>`).join('')}</div></div>`;
 }
 
-function wireFieldTypeSpecificInspector(holder, f, prefix, rerenderInspector, redrawOnly){
+function wireFieldTypeSpecificInspector(holder, f, prefix, rerenderInspector, redrawOnly, canvasW, canvasH){
   const sizeInput = holder.querySelector('#'+prefix+'-size');
   if(sizeInput) sizeInput.oninput = e=>{ f.fontSize=(parseFloat(e.target.value)||3)/100; redrawOnly(); };
   const alignInput = holder.querySelector('#'+prefix+'-align');
@@ -402,6 +415,36 @@ function wireFieldTypeSpecificInspector(holder, f, prefix, rerenderInspector, re
   if(italicInput) italicInput.onchange = e=>{ f.italic = e.target.checked; redrawOnly(); };
   const underlineInput = holder.querySelector('#'+prefix+'-underline');
   if(underlineInput) underlineInput.onchange = e=>{ f.underline = e.target.checked; redrawOnly(); };
+
+  // Curseur de taille (image et QR code) : conserve un cadre carré en pixels
+  // réels, même si la largeur et la hauteur du canevas diffèrent.
+  const sizeSlider = holder.querySelector('#'+prefix+'-sizeslider');
+  if(sizeSlider) sizeSlider.oninput = e=>{
+    const pct = parseFloat(e.target.value)/100;
+    const w = canvasW || 800, h = canvasH || 500;
+    f.w = pct;
+    f.h = (pct * w) / h;
+    const label = holder.querySelector('#'+prefix+'-sizeslider-val');
+    if(label) label.textContent = e.target.value;
+    redrawOnly();
+  };
+
+  const borderEnabledInput = holder.querySelector('#'+prefix+'-border-enabled');
+  if(borderEnabledInput) borderEnabledInput.onchange = e=>{
+    f.borderEnabled = e.target.checked;
+    const opts = holder.querySelector('#'+prefix+'-border-options');
+    if(opts) opts.style.display = e.target.checked ? 'block' : 'none';
+    redrawOnly();
+  };
+  const borderColorInput = holder.querySelector('#'+prefix+'-border-color');
+  if(borderColorInput) borderColorInput.oninput = e=>{ f.borderColor = e.target.value; redrawOnly(); };
+  const borderWidthInput = holder.querySelector('#'+prefix+'-border-width');
+  if(borderWidthInput) borderWidthInput.oninput = e=>{
+    f.borderWidth = parseFloat(e.target.value)/1000;
+    const label = holder.querySelector('#'+prefix+'-border-width-val');
+    if(label) label.textContent = e.target.value;
+    redrawOnly();
+  };
 }
 
 /* ---------------- Numéro de référence auto-incrémenté ---------------- */
@@ -848,7 +891,7 @@ function renderDocxPositionedInspector(){
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur l'aperçu pour le repositionner.</div>
     </div>`;
   pendingInspectorField = { rerender: ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); } };
-  wireFieldTypeSpecificInspector(holder, f, 'dinsp', ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); }, ()=>{ renderDocxPositionedList(); drawDocxMapCanvas(); });
+  wireFieldTypeSpecificInspector(holder, f, 'dinsp', ()=>{ renderDocxPositionedInspector(); drawDocxMapCanvas(); }, ()=>{ renderDocxPositionedList(); drawDocxMapCanvas(); }, docxCanvasImg ? docxCanvasImg.naturalWidth : 800, docxCanvasImg ? docxCanvasImg.naturalHeight : 500);
   holder.querySelector('#dinsp-name').oninput = e=>{ f.name=e.target.value; renderDocxPositionedList(); drawDocxMapCanvas(); };
   holder.querySelector('#dinsp-type').onchange = e=>{
     f.type=e.target.value;
@@ -1032,7 +1075,7 @@ function renderInspector(){
       <div class="inspector-row" style="font-size:11.5px;color:var(--slate);">Astuce : fais glisser le champ directement sur le document pour le repositionner.</div>
     </div>`;
   pendingInspectorField = { rerender: ()=>{ renderInspector(); drawMapCanvas(); } };
-  wireFieldTypeSpecificInspector(holder, f, 'insp', ()=>{ renderInspector(); drawMapCanvas(); }, ()=>{ renderFieldList(); drawMapCanvas(); });
+  wireFieldTypeSpecificInspector(holder, f, 'insp', ()=>{ renderInspector(); drawMapCanvas(); }, ()=>{ renderFieldList(); drawMapCanvas(); }, current.width, current.height);
   holder.querySelector('#insp-name').oninput = e=>{ f.name=e.target.value; renderFieldList(); drawMapCanvas(); };
   holder.querySelector('#insp-type').onchange = e=>{
     f.type=e.target.value;
@@ -1081,6 +1124,15 @@ function drawFieldOnCtx(ctx, f, w, h){
     ctx.setLineDash([]);
     ctx.fillStyle='#B8862B'; ctx.font='12px Inter'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(f.type==='qrcode' ? 'QR' : 'Photo', cx, cy);
+    if(f.type==='image' && f.borderEnabled){
+      const bwidth = Math.max(1, (f.borderWidth||0.006)*w);
+      ctx.strokeStyle = f.borderColor || '#1B2340'; ctx.lineWidth = bwidth;
+      if(isCircle){
+        ctx.beginPath(); ctx.arc(cx, cy, Math.min(bw,bh)/2 - bwidth/2, 0, Math.PI*2); ctx.stroke();
+      } else {
+        ctx.strokeRect(cx-bw/2+bwidth/2, cy-bh/2+bwidth/2, bw-bwidth, bh-bwidth);
+      }
+    }
   }
 }
 function drawMapCanvas(){
