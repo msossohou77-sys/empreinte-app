@@ -207,7 +207,7 @@ table.subs th{color:var(--slate);font-weight:500;font-size:11.5px;}
               <label><input type="radio" name="refMode" value="custom" id="refModeCustom" onchange="setReferenceMode('custom')"> Préfixe personnalisé + numéro de série</label>
             </div>
             <div id="refPrefixRow" style="display:none;">
-              <input type="text" id="refPrefix" placeholder="Ex. DOC-RH" maxlength="30" oninput="scheduleReferencePrefixSave()">
+              <input type="text" id="refPrefix" placeholder="Ex. DOC-RH" maxlength="30" oninput="scheduleReferencePrefixSave()" onblur="flushReferencePrefixSave()">
               <span class="ref-prefix-hint">Donnera par exemple : <strong id="refPrefixExample">DOC-RH-0014</strong></span>
             </div>
             <p class="import-help" style="margin:10px 0 0 0;">Le bloc de référence est ajouté comme un champ que tu peux glisser-déposer, redimensionner et mettre en forme ci-dessous, exactement comme les autres.</p>
@@ -494,6 +494,16 @@ function scheduleReferencePrefixSave(){
   document.getElementById('refPrefixExample').textContent = (val||'DOC') + '-0014';
   clearTimeout(refPrefixTimer);
   refPrefixTimer = setTimeout(saveReferenceSettings, 700);
+}
+// Sauvegarde immédiate (sans attendre les 700ms) quand l'utilisateur quitte le
+// champ ou change d'onglet — évite de perdre un préfixe tapé juste avant de
+// cliquer ailleurs, qui ne partait sinon qu'après le délai d'attente.
+function flushReferencePrefixSave(){
+  if(refPrefixTimer){
+    clearTimeout(refPrefixTimer);
+    refPrefixTimer = null;
+    saveReferenceSettings();
+  }
 }
 
 async function saveReferenceSettings(){
@@ -988,6 +998,7 @@ async function runDocxPreview(){
 }
 
 function switchTab(tab){
+  flushReferencePrefixSave(); // au cas où l'utilisateur quitte le champ préfixe en cliquant directement sur un autre onglet
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===tab));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-'+tab).classList.add('active');
@@ -1181,6 +1192,7 @@ mapCanvasEl.addEventListener('mousemove', e=>{
 window.addEventListener('mouseup', ()=>{ dragging=null; });
 
 async function saveFields(){
+  flushReferencePrefixSave();
   const fields = current.fields.map(f=>({ ...f, id: f.id.startsWith('tmp-') ? undefined : f.id }));
   const res = await fetch(`/api/templates/${current.id}/fields`, {
     method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ fields })
