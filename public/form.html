@@ -301,7 +301,9 @@ function drawPreview(){
       ctx.font = `${f.italic?'italic ':''}${f.bold?'bold ':''}${fontPx}px "${family}"`;
       ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
       let dx=cx; if(f.align==='left') dx=cx-(f.w*w)/2; if(f.align==='right') dx=cx+(f.w*w)/2;
-      const text = (f.type==='text' && v!==undefined && v!=='') ? v : (f.sample||f.name);
+      const text = f.type==='reference'
+        ? (form.template.referencePreview || f.sample || f.name)
+        : ((v!==undefined && v!=='') ? v : (f.sample||f.name));
       ctx.fillText(text, dx, cy);
       if(f.underline){
         const tw = ctx.measureText(text).width;
