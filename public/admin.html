@@ -483,8 +483,18 @@ function toggleReference(){
   saveReferenceSettings();
 }
 
+// Texte de référence affiché dans l'aperçu : DOIT rester identique au format généré
+// côté serveur (formatReference dans server.js) — préfixe + numéro de série.
+function referencePreviewText(){
+  const mode = current && current.referenceMode;
+  const prefix = ((current && current.referencePrefix) || '').trim();
+  return (mode==='custom' && prefix) ? prefix + '-0001' : 'REF-0001';
+}
+
 function setReferenceMode(mode){
   document.getElementById('refPrefixRow').style.display = mode==='custom' ? 'block' : 'none';
+  current.referenceMode = mode;
+  refreshFieldViewsForCurrentType();
   saveReferenceSettings();
 }
 
@@ -492,6 +502,8 @@ let refPrefixTimer = null;
 function scheduleReferencePrefixSave(){
   const val = document.getElementById('refPrefix').value.trim();
   document.getElementById('refPrefixExample').textContent = (val||'DOC') + '-0014';
+  current.referencePrefix = val;           // met à jour l'état tout de suite...
+  refreshFieldViewsForCurrentType();        // ...et redessine l'aperçu à chaque frappe
   clearTimeout(refPrefixTimer);
   refPrefixTimer = setTimeout(saveReferenceSettings, 700);
 }
@@ -509,12 +521,15 @@ function flushReferencePrefixSave(){
 async function saveReferenceSettings(){
   const mode = document.getElementById('refModeCustom').checked ? 'custom' : 'auto';
   const prefix = document.getElementById('refPrefix').value.trim();
+  current.referenceMode = mode; current.referencePrefix = prefix;
   const res = await fetch(`/api/templates/${current.id}/integrations`, {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ webhookUrl: current.webhookUrl || '', docxPreviewEnabled: !!current.docxPreviewEnabled, referenceMode: mode, referencePrefix: prefix })
   });
-  const data = await res.json();
-  current.referenceMode = data.referenceMode; current.referencePrefix = data.referencePrefix;
+  if(!res.ok){ showToast("Impossible d'enregistrer la référence"); return; }
+  // L'état local (current.*) n'est volontairement PAS réécrit depuis la réponse : si
+  // l'utilisateur a continué à taper pendant la requête, on écraserait sa saisie.
+  if(current.type==='docx') scheduleDocxPreview(); // l'aperçu Word est rendu côté serveur
 }
 
 /* ---------------- Polices personnalisées (web-safe + Local Font Access) ---------------- */
@@ -1113,7 +1128,7 @@ function drawFieldOnCtx(ctx, f, w, h){
     ctx.font = `${f.italic?'italic ':''}${f.bold?'bold ':''}${fontPx}px "${family}"`;
     ctx.fillStyle=f.color; ctx.textAlign=f.align; ctx.textBaseline='middle';
     let dx = cx; if(f.align==='left') dx = cx-(f.w*w)/2; if(f.align==='right') dx = cx+(f.w*w)/2;
-    const text = f.sample||f.name;
+    const text = f.type==='reference' ? referencePreviewText() : (f.sample||f.name);
     ctx.fillText(text, dx, cy);
     if(f.underline){
       const tw = ctx.measureText(text).width;
