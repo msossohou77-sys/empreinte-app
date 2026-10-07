@@ -239,7 +239,7 @@ async function previewDocxAdmin(req, res, templateId, user) {
   if (template.type !== 'docx') return sendJson(res, 400, { error: 'Aperçu disponible uniquement pour les modèles Word.' });
   const body = await readJsonBody(req);
   const fields = db.filter('template_fields', f => f.templateId === templateId);
-  const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', null);
+  const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', referencePreviewText(template));
   const customFontFiles = loadCustomFontFiles(user.id, fields);
   const workDir = path.join(WORK_DIR, 'preview-' + id());
   try {
@@ -281,7 +281,7 @@ async function generateViaApi(req, res, templateId, user) {
 
   const displayValues = {};
   fields.forEach(f => {
-    displayValues[f.name] = (f.type === 'image') ? '[photo]' : (f.type === 'qrcode') ? '[qr]' : (valuesByName[f.name] || f.sample || '');
+    displayValues[f.name] = (f.type === 'image') ? '[photo]' : (f.type === 'qrcode') ? '[qr]' : (f.type === 'reference') ? (render.referenceText || '') : (valuesByName[f.name] || f.sample || '');
   });
   const submission = {
     id: submissionId, linkId: null, templateId, renderId: render.id,
@@ -551,7 +551,8 @@ function getPublicForm(req, res, token) {
       imageUrl: template.type === 'image' ? `/uploads/${template.filename}` : null,
       branding: template.branding || null,
       mailEnabled: mailer.isConfigured(),
-      docxPreviewEnabled: !!template.docxPreviewEnabled
+      docxPreviewEnabled: !!template.docxPreviewEnabled,
+      referencePreview: referencePreviewText(template)
     },
     fields
   });
@@ -560,14 +561,28 @@ function getPublicForm(req, res, token) {
 // Numéro de référence auto-incrémenté (une case à cocher qui ajoute un champ de
 // type "reference" au modèle). Le compteur est stocké sur le modèle lui-même et
 // incrémenté à CHAQUE génération réelle (jamais lors d'un simple aperçu).
-function computeReferenceText(template) {
-  const seq = (template.referenceSeq || 0) + 1;
-  db.update('templates', template.id, { referenceSeq: seq });
+// Format unique de la référence (préfixe personnalisé ou "REF" par défaut + numéro
+// de série sur 4 chiffres). Utilisé à la fois par la génération réelle et par les
+// aperçus, pour que ce que voit l'utilisateur avant de publier soit identique au
+// document final.
+function formatReference(template, seq) {
   const padded = String(seq).padStart(4, '0');
   if (template.referenceMode === 'custom' && template.referencePrefix) {
     return `${template.referencePrefix}-${padded}`;
   }
   return `REF-${padded}`;
+}
+
+function computeReferenceText(template) {
+  const seq = (template.referenceSeq || 0) + 1;
+  db.update('templates', template.id, { referenceSeq: seq });
+  return formatReference(template, seq);
+}
+
+// Texte de référence affiché dans les APERÇUS : même format que le document final,
+// mais sans incrémenter le compteur (on montre toujours le numéro "0001" en exemple).
+function referencePreviewText(template) {
+  return formatReference(template, 1);
 }
 
 async function buildRender(templateId, fields, values, options = {}) {
@@ -613,7 +628,7 @@ async function previewPublic(req, res, token) {
 
   if (template.type === 'docx') {
     if (!template.docxPreviewEnabled) return sendJson(res, 400, { error: "Aperçu non activé pour ce modèle — génère le document pour le voir." });
-    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', null);
+    const { valuesByName, positionedFields, positionedValues } = buildDocxValueMaps(fields, body.values || {}, 'https://exemple.empreinte.io/verify/apercu', referencePreviewText(template));
     const customFontFiles = loadCustomFontFiles(template.ownerId, fields);
     const workDir = path.join(WORK_DIR, 'preview-' + id());
     try {
@@ -626,7 +641,10 @@ async function previewPublic(req, res, token) {
     }
   }
 
-  const pngBuffer = await renderPng(path.join(UPLOADS_DIR, template.filename), fields, body.values || {});
+  const previewValues = { ...(body.values || {}) };
+  const refField = fields.find(f => f.type === 'reference');
+  if (refField) previewValues[refField.id] = referencePreviewText(template);
+  const pngBuffer = await renderPng(path.join(UPLOADS_DIR, template.filename), fields, previewValues);
   sendJson(res, 200, { previewDataUri: 'data:image/png;base64,' + pngBuffer.toString('base64') });
 }
 
@@ -646,7 +664,7 @@ async function submitPublic(req, res, token) {
   const displayValues = {};
   for (const f of fields) {
     const v = (body.values || {})[f.id];
-    displayValues[f.name] = (f.type === 'image') ? '[photo]' : (f.type === 'qrcode') ? '[qr]' : (v || f.sample || '');
+    displayValues[f.name] = (f.type === 'image') ? '[photo]' : (f.type === 'qrcode') ? '[qr]' : (f.type === 'reference') ? (render.referenceText || '') : (v || f.sample || '');
   }
   const submission = {
     id: submissionId, linkId: link.id, templateId: link.templateId,
